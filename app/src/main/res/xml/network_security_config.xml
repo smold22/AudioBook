@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/sectigo_root_r46" />
+            <certificates src="@raw/sectigo_inter_r36" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

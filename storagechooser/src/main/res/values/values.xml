@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <array name="default_dark">
+        <!-- Overview -->
+        <item>@color/colorPrimary</item> <!--  Top Header bg -->
+        <item>@android:color/white</item> <!-- header text   -->
+        <item>@android:color/black</item> <!-- list bg  -->
+        <item>@android:color/white</item> <!--  storage list name text  -->
+        <item>#da6c6c</item> <!-- free space text  -->
+        <item>@color/colorPrimary</item> <!-- memory bar -->
+
+        <!-- secondary dialog colors -->
+        <item>@color/colorPrimary</item> <!-- address bar bg -->
+        <item>@android:color/black</item> <!-- list bg -->
+        <item>@android:color/white</item> <!-- list text -->
+        <item>@android:color/white</item> <!-- address bar tint -->
+        <item>@color/chevronBgColor</item> <!-- new folder hint tint -->
+        <item>#da6c6c</item> <!-- select button color -->
+        <item>#da6c6c</item> <!-- new folder layour bg -->
+        <item>#da6c6c</item> <!-- new multi fab -->
+        <item>#da6c6c</item> <!-- new multi fab -->
+    </array>
+    <array name="default_light">
+        <!-- Overview -->
+        <item>@color/colorPrimary</item> <!--  Top Header bg -->
+        <item>@android:color/white</item> <!-- header text   -->
+        <item>@android:color/white</item> <!-- list bg  -->
+        <item>@android:color/black</item> <!--  storage list name text  -->
+        <item>@color/colorPrimary</item> <!-- free space text  -->
+        <item>@color/colorAccent</item> <!-- memory bar -->
+
+        <!-- secondary dialog colors -->
+        <item>@color/colorPrimary</item> <!-- address bar bg -->
+        <item>@android:color/white</item> <!-- list bg -->
+        <item>@android:color/black</item> <!-- list text -->
+        <item>@android:color/white</item> <!-- address bar tint -->
+        <item>@color/chevronBgColor</item> <!-- new folder hint tint -->
+        <item>#da6c6c</item> <!-- select button color -->
+        <item>#da6c6c</item> <!-- new folder layour bg -->
+        <item>#da6c6c</item> <!-- new folder layour bg -->
+        <item>@color/colorPrimary</item> <!-- new folder layour bg -->
+    </array>
+    <color name="cancel_color">#3fa19f</color>
+    <color name="chevronBgColor">#50ffffff</color>
+    <color name="colorAccent">#ff9c40</color>
+    <color name="colorCyanListClick">#d6c8f5f3</color>
+    <color name="colorListDivider">#89606060</color>
+    <color name="colorPrimary">#2d6c55</color>
+    <color name="colorPrimaryDark">#235644</color>
+    <color name="inactiveGradientColor">#53000000</color>
+    <color name="memory_bar_color">#7bde65</color>
+    <color name="memory_status_color">#de6565</color>
+    <color name="new_folder_color">#c14b84</color>
+    <color name="pathLayoutBgColor">#70ffffff</color>
+    <color name="select_color">#6b3fa1</color>
+    <string name="app_name">Storage Chooser</string>
+    <string name="choose_external_storage">Choose External Storage</string>
+    <string name="choose_storage">Choose Storage</string>
+    <string name="external_storage">External storage</string>
+    <string name="text_freespace">%1$s free</string>
+    <string name="toast_not_readable">The storage you have chosen is not accessible.</string>
+    <string name="toast_threshold_breached">%1$s is not sufficient for current operation. Please clear out some space.</string>
+    <string name="usb_storage">USB storage</string>
+    <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+    </style>
+    <style name="DialogTheme" parent="Theme.AppCompat.Light.Dialog">
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+    </style>
+    <style name="EditTextHint" parent="TextAppearance.AppCompat">
+        <item name="android:textColor">@color/chevronBgColor</item>
+        <item name="android:textColorHint">@color/chevronBgColor</item>
+        <item name="android:textSize">12sp</item>
+        <item name="colorAccent">@color/pathLayoutBgColor</item>
+        <item name="colorControlNormal">@color/chevronBgColor</item>
+        <item name="colorControlHighlight">@color/pathLayoutBgColor</item>
+        <item name="colorControlActivated">@color/pathLayoutBgColor</item>
+    </style>
+</resources>
