@@ -4,6 +4,9 @@ import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.first
 
 private val Context.progressDataStore by preferencesDataStore(name = "progress")
@@ -17,17 +20,24 @@ class ProgressStore(context: Context) {
 
     private val appContext = context.applicationContext
 
+    private val changeSignal = MutableSharedFlow<Unit>(extraBufferCapacity = 64)
+
+    /** Поток сигналов об изменении данных (для автосинхронизации). */
+    val changes: Flow<Unit> = changeSignal.asSharedFlow()
+
     suspend fun save(bookId: String, trackIndex: Int, positionMs: Long) {
         appContext.progressDataStore.edit { prefs ->
-            prefs[stringPreferencesKey("book:$bookId")] = "$trackIndex;$positionMs"
+            prefs[stringPreferencesKey("book:$bookId")] =
+                "$trackIndex;$positionMs;${System.currentTimeMillis()}"
         }
+        changeSignal.emit(Unit)
     }
 
     suspend fun load(bookId: String): TrackPosition? {
         val raw = appContext.progressDataStore.data.first()[stringPreferencesKey("book:$bookId")]
             ?: return null
         val parts = raw.split(";")
-        if (parts.size != 2) return null
+        if (parts.size < 2) return null
         val track = parts[0].toIntOrNull() ?: return null
         val position = parts[1].toLongOrNull() ?: return null
         return TrackPosition(track, position)
@@ -35,6 +45,7 @@ class ProgressStore(context: Context) {
 
     suspend fun clear() {
         appContext.progressDataStore.edit { it.clear() }
+        changeSignal.emit(Unit)
     }
 
     suspend fun snapshot(): Map<String, String> {
@@ -53,9 +64,21 @@ class ProgressStore(context: Context) {
                 prefs[stringPreferencesKey(name)] = value
             }
         }
+        changeSignal.emit(Unit)
     }
 
-    private companion object {
+    suspend fun restore(snapshot: Map<String, String>) {
+        appContext.progressDataStore.edit { prefs ->
+            prefs.asMap().keys.filter { it.name.startsWith(PROGRESS_PREFIX) }
+                .forEach { prefs.remove(it) }
+            snapshot.forEach { (name, value) ->
+                prefs[stringPreferencesKey(name)] = value
+            }
+        }
+        changeSignal.emit(Unit)
+    }
+
+    companion object {
         const val PROGRESS_PREFIX = "book:"
     }
 }

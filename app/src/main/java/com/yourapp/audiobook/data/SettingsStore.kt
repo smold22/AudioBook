@@ -7,6 +7,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
@@ -16,6 +18,11 @@ class SettingsStore(context: Context) {
 
     private val appContext = context.applicationContext
 
+    private val changeSignal = MutableSharedFlow<Unit>(extraBufferCapacity = 64)
+
+    /** Поток сигналов об изменении настроек (для автосинхронизации). */
+    val changes: Flow<Unit> = changeSignal.asSharedFlow()
+
     private val folderKey = stringPreferencesKey("download_folder")
     private val themeKey = stringPreferencesKey("theme")
     private val sourceKey = stringPreferencesKey("source_id")
@@ -23,6 +30,7 @@ class SettingsStore(context: Context) {
     private val viewModeKey = stringPreferencesKey("view_mode")
     private val hideTabLabelsKey = booleanPreferencesKey("hide_tab_labels")
     private val fontScaleKey = stringPreferencesKey("font_scale")
+    private val hideFemaleAuthorsKey = booleanPreferencesKey("hide_female_authors")
 
     val downloadFolder: Flow<String?> =
         appContext.settingsDataStore.data.map { it[folderKey] }
@@ -45,28 +53,42 @@ class SettingsStore(context: Context) {
     val fontScale: Flow<String> =
         appContext.settingsDataStore.data.map { it[fontScaleKey] ?: FONT_MEDIUM }
 
+    val hideFemaleAuthors: Flow<Boolean> =
+        appContext.settingsDataStore.data.map { it[hideFemaleAuthorsKey] ?: false }
+
     suspend fun setResumeOnLaunch(enabled: Boolean) {
         appContext.settingsDataStore.edit { prefs ->
             prefs[resumeOnLaunchKey] = enabled
         }
+        changeSignal.emit(Unit)
     }
 
     suspend fun setViewMode(mode: String) {
         appContext.settingsDataStore.edit { prefs ->
             prefs[viewModeKey] = mode
         }
+        changeSignal.emit(Unit)
     }
 
     suspend fun setHideTabLabels(enabled: Boolean) {
         appContext.settingsDataStore.edit { prefs ->
             prefs[hideTabLabelsKey] = enabled
         }
+        changeSignal.emit(Unit)
     }
 
     suspend fun setFontScale(mode: String) {
         appContext.settingsDataStore.edit { prefs ->
             prefs[fontScaleKey] = mode
         }
+        changeSignal.emit(Unit)
+    }
+
+    suspend fun setHideFemaleAuthors(enabled: Boolean) {
+        appContext.settingsDataStore.edit { prefs ->
+            prefs[hideFemaleAuthorsKey] = enabled
+        }
+        changeSignal.emit(Unit)
     }
 
     suspend fun currentSourceId(): String? =
@@ -76,6 +98,7 @@ class SettingsStore(context: Context) {
         appContext.settingsDataStore.edit { prefs ->
             if (id == null) prefs.remove(sourceKey) else prefs[sourceKey] = id
         }
+        changeSignal.emit(Unit)
     }
 
     suspend fun currentDownloadFolder(): String? =
@@ -140,6 +163,7 @@ class SettingsStore(context: Context) {
         appContext.settingsDataStore.edit { prefs ->
             prefs[themeKey] = mode
         }
+        changeSignal.emit(Unit)
     }
 
     fun ignoredFlow(section: IgnoreSection): Flow<Set<String>> =
@@ -155,6 +179,7 @@ class SettingsStore(context: Context) {
         appContext.settingsDataStore.edit { prefs ->
             prefs[key] = prefs[key].orEmpty() + trimmed
         }
+        changeSignal.emit(Unit)
     }
 
     suspend fun removeIgnored(section: IgnoreSection, value: String) {
@@ -162,6 +187,37 @@ class SettingsStore(context: Context) {
         appContext.settingsDataStore.edit { prefs ->
             prefs[key] = prefs[key].orEmpty() - value
         }
+        changeSignal.emit(Unit)
+    }
+
+    /** Снимок всех синхронизируемых настроек (без путей к скачанным файлам). */
+    suspend fun snapshotAll(): Map<String, String> {
+        val prefs = appContext.settingsDataStore.data.first()
+        return prefs.asMap().entries
+            .filter { (key, value) ->
+                val name = key.name
+                value is String &&
+                    name != downloadFolderName &&
+                    !name.startsWith(bookFolderPrefix) &&
+                    !name.startsWith(bookMetaPrefix)
+            }
+            .associate { (key, value) -> key.name to value as String }
+    }
+
+    /** Применяет снимок настроек, пропуская ключи, специфичные для устройства. */
+    suspend fun restoreAll(snapshot: Map<String, String>) {
+        if (snapshot.isEmpty()) return
+        appContext.settingsDataStore.edit { prefs ->
+            snapshot.forEach { (name, value) ->
+                if (name != downloadFolderName &&
+                    !name.startsWith(bookFolderPrefix) &&
+                    !name.startsWith(bookMetaPrefix)
+                ) {
+                    prefs[stringPreferencesKey(name)] = value
+                }
+            }
+        }
+        changeSignal.emit(Unit)
     }
 
     companion object {
@@ -176,8 +232,9 @@ class SettingsStore(context: Context) {
         const val FONT_MEDIUM = "medium"
         const val FONT_LARGE = "large"
 
-        private const val bookFolderPrefix = "bookFolder:"
-        private const val bookMetaPrefix = "bookMeta:"
+        const val downloadFolderName = "download_folder"
+        const val bookFolderPrefix = "bookFolder:"
+        const val bookMetaPrefix = "bookMeta:"
     }
 }
 

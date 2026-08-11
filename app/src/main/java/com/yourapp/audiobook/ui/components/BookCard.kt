@@ -18,11 +18,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.yourapp.audiobook.source.api.Book
+
+private val CoverPlaceholder = ColorPainter(Color(0xFFE8E6E3))
+private val CoverError = ColorPainter(Color(0xFFD2CFCC))
 
 @Composable
 fun BookCard(book: Book, onClick: () -> Unit) {
@@ -36,6 +41,8 @@ fun BookCard(book: Book, onClick: () -> Unit) {
         AsyncImage(
             model = book.coverUrl,
             contentDescription = book.title,
+            placeholder = CoverPlaceholder,
+            error = CoverError,
             modifier = Modifier
                 .size(78.dp)
                 .clip(RoundedCornerShape(8.dp)),

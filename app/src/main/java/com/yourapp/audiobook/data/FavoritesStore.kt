@@ -6,6 +6,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.yourapp.audiobook.source.api.Book
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
@@ -16,6 +18,11 @@ private val Context.favoritesDataStore by preferencesDataStore(name = "favorites
 class FavoritesStore(context: Context) {
 
     private val appContext = context.applicationContext
+
+    private val changeSignal = MutableSharedFlow<Unit>(extraBufferCapacity = 64)
+
+    /** Поток сигналов об изменении данных (для автосинхронизации). */
+    val changes: Flow<Unit> = changeSignal.asSharedFlow()
 
     private val favoritesFlow = appContext.favoritesDataStore.data.map { prefs ->
         prefs[booksKey]?.let(::decodeList).orEmpty()
@@ -38,6 +45,7 @@ class FavoritesStore(context: Context) {
             }
             prefs[booksKey] = encodeList(updated)
         }
+        changeSignal.emit(Unit)
     }
 
     suspend fun remove(bookKey: String) {
@@ -45,6 +53,7 @@ class FavoritesStore(context: Context) {
             val current = prefs[booksKey]?.let(::decodeList).orEmpty()
             prefs[booksKey] = encodeList(current.filterNot { keyOf(it) == bookKey })
         }
+        changeSignal.emit(Unit)
     }
 
     suspend fun snapshot(): List<Book> = favoritesFlow.first()
@@ -53,6 +62,7 @@ class FavoritesStore(context: Context) {
         appContext.favoritesDataStore.edit { prefs ->
             prefs[booksKey] = encodeList(books)
         }
+        changeSignal.emit(Unit)
     }
 
     private fun decodeList(raw: String): List<Book> = runCatching {

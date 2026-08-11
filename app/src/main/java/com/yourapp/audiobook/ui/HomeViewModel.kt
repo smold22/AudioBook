@@ -2,10 +2,12 @@ package com.yourapp.audiobook.ui
 
 import android.app.Application
 import androidx.lifecycle.viewModelScope
+import com.yourapp.audiobook.data.AuthorGender
 import com.yourapp.audiobook.source.api.Book
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 enum class HomeFeed(val label: String) {
@@ -53,13 +55,19 @@ class HomeViewModel(app: Application) : BookListViewModel(app) {
     fun refreshCollections() {
         viewModelScope.launch {
             val source = appContext.activeSource() ?: return@launch
+            val hideFemale = appContext.settingsStore.hideFemaleAuthors.first()
             val new = if (source.supportsNew()) {
                 runCatching { source.newBooks(1) }.getOrDefault(emptyList())
             } else {
                 emptyList()
             }
             new.forEach { appContext.bookCache.put(it) }
-            _collections.value = HomeCollections(new = new)
+            val visible = if (hideFemale) {
+                new.filterNot { it.author != null && AuthorGender.isFemaleAuthor(it.author!!) }
+            } else {
+                new
+            }
+            _collections.value = HomeCollections(new = visible)
         }
     }
 

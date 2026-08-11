@@ -13,3 +13,4 @@ release/
 *.log
 replay_*.log
 hs_err_pid*.log
+key.properties

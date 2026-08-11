@@ -11,6 +11,7 @@ import com.yourapp.audiobook.data.HistoryStore
 import com.yourapp.audiobook.data.ProgressStore
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.data.SourceCooldown
+import com.yourapp.audiobook.data.sync.SyncManager
 import com.yourapp.audiobook.download.DownloadManager
 import com.yourapp.audiobook.player.PlayerController
 import com.yourapp.audiobook.source.api.AudiobookSource
@@ -64,6 +65,8 @@ class AudioBookApplication : Application() {
     lateinit var bookmarksStore: BookmarksStore
         private set
     lateinit var equalizerStore: EqualizerStore
+        private set
+    lateinit var syncManager: SyncManager
         private set
     lateinit var playerController: PlayerController
         private set
@@ -129,6 +132,15 @@ class AudioBookApplication : Application() {
         historyStore = HistoryStore(this)
         bookmarksStore = BookmarksStore(this)
         equalizerStore = EqualizerStore(this)
+        syncManager = SyncManager(
+            this,
+            favoritesStore,
+            historyStore,
+            progressStore,
+            bookmarksStore,
+            settingsStore,
+        )
+        syncManager.start()
         playerController = PlayerController(this, historyStore, progressStore, bookmarksStore, equalizerStore)
     }
 }

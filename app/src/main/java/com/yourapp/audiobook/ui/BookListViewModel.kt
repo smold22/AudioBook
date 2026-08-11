@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.yourapp.audiobook.AudioBookApplication
+import com.yourapp.audiobook.data.AuthorGender
 import com.yourapp.audiobook.data.IgnoreSection
 import com.yourapp.audiobook.source.api.Book
 import kotlinx.coroutines.CancellationException
@@ -31,6 +32,18 @@ abstract class BookListViewModel(app: Application) : AndroidViewModel(app) {
     private var loadingJob: kotlinx.coroutines.Job? = null
     private var generation = 0L
     private var lastSourceId: String? = null
+    private var hideFemaleAuthors = false
+
+    init {
+        viewModelScope.launch {
+            appContext.settingsStore.hideFemaleAuthors.collect { enabled ->
+                if (enabled != hideFemaleAuthors) {
+                    hideFemaleAuthors = enabled
+                    refresh()
+                }
+            }
+        }
+    }
 
     protected abstract suspend fun loadPage(page: Int): List<Book>
 
@@ -110,11 +123,19 @@ abstract class BookListViewModel(app: Application) : AndroidViewModel(app) {
         val genres = appContext.settingsStore.ignored(IgnoreSection.GENRE)
         val authors = appContext.settingsStore.ignored(IgnoreSection.AUTHOR)
         val readers = appContext.settingsStore.ignored(IgnoreSection.READER)
-        if (genres.isEmpty() && authors.isEmpty() && readers.isEmpty()) return books
-        return books.filterNot { book ->
-            genres.any { book.genre?.contains(it, ignoreCase = true) == true } ||
-                authors.any { book.author?.contains(it, ignoreCase = true) == true } ||
-                readers.any { book.reader?.contains(it, ignoreCase = true) == true }
+        var filtered = books
+        if (genres.isNotEmpty() || authors.isNotEmpty() || readers.isNotEmpty()) {
+            filtered = filtered.filterNot { book ->
+                genres.any { book.genre?.contains(it, ignoreCase = true) == true } ||
+                    authors.any { book.author?.contains(it, ignoreCase = true) == true } ||
+                    readers.any { book.reader?.contains(it, ignoreCase = true) == true }
+            }
         }
+        if (hideFemaleAuthors) {
+            filtered = filtered.filterNot { book ->
+                book.author != null && AuthorGender.isFemaleAuthor(book.author!!)
+            }
+        }
+        return filtered
     }
 }

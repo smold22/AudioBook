@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.yourapp.audiobook.AudioBookApplication
+import com.yourapp.audiobook.data.AuthorGender
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.ui.components.bookItems
 import kotlinx.coroutines.launch
@@ -40,9 +41,13 @@ fun FavoritesScreen(navController: NavHostController) {
     val scope = rememberCoroutineScope()
     val favorites by app.favoritesStore.favorites.collectAsStateWithLifecycle(initialValue = emptyList())
     val deadKeys by app.deadBooksStore.deadKeys.collectAsStateWithLifecycle(initialValue = emptySet())
+    val hideFemaleAuthors by app.settingsStore.hideFemaleAuthors.collectAsStateWithLifecycle(initialValue = false)
     val viewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
-    val visibleFavorites = remember(favorites, deadKeys) {
-        favorites.filterNot { "${it.sourceId}:${it.id}" in deadKeys }
+    val visibleFavorites = remember(favorites, deadKeys, hideFemaleAuthors) {
+        favorites.filterNot { book ->
+            "${book.sourceId}:${book.id}" in deadKeys ||
+                (hideFemaleAuthors && book.author != null && AuthorGender.isFemaleAuthor(book.author!!))
+        }
     }
 
     Column(Modifier.fillMaxSize()) {

@@ -43,6 +43,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavHostController
 import com.yourapp.audiobook.AudioBookApplication
+import com.yourapp.audiobook.data.AuthorGender
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.source.api.Book
 import com.yourapp.audiobook.ui.components.bookItems
@@ -89,8 +90,12 @@ fun DownloadsScreen(navController: NavHostController) {
     val app = context.applicationContext as AudioBookApplication
     val viewModel: DownloadsViewModel = viewModel()
     val items by viewModel.items.collectAsStateWithLifecycle()
+    val hideFemaleAuthors by app.settingsStore.hideFemaleAuthors.collectAsStateWithLifecycle(initialValue = false)
     val viewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
     var pendingDelete by remember { mutableStateOf<DownloadedEntry?>(null) }
+    val visibleItems = remember(items, hideFemaleAuthors) {
+        AuthorGender.filterFemale(items.map { it.book }, hideFemaleAuthors)
+    }
 
     val storagePermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.READ_MEDIA_AUDIO
@@ -139,7 +144,7 @@ fun DownloadsScreen(navController: NavHostController) {
                 modifier = Modifier.fillMaxSize(),
             ) {
                 bookItems(
-                    books = items.map { it.book },
+                    books = visibleItems,
                     viewMode = viewMode,
                     onBookClick = { book ->
                         navController.navigate("book/${Uri.encode(app.bookCache.keyOf(book))}")

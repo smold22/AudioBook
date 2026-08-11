@@ -28,7 +28,6 @@ import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
 import coil3.compose.LocalPlatformContext
 import coil3.request.ImageRequest
-import coil3.request.crossfade
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.source.api.Book
 
@@ -46,11 +45,10 @@ fun LazyListScope.bookItems(
     if (viewMode == SettingsStore.VIEW_GRID) {
         val rows = books.chunked(2)
         rows.forEachIndexed { rowIndex, row ->
-            val prefetchBooks = rows.drop(rowIndex + 1).take(2).flatten()
             item(key = "grid-row-" + row.joinToString("|") { key(it).toString() }) {
                 BookGridRow(
                     books = row,
-                    prefetchBooks = prefetchBooks,
+                    prefetchBooks = books.drop((rowIndex + 1) * 2).take(PREFETCH_COUNT),
                     onBookClick = onBookClick,
                     action = action,
                 )
@@ -80,10 +78,12 @@ private fun BookGridRow(
     action: (@Composable (Book) -> Unit)? = null,
 ) {
     val context = LocalPlatformContext.current
-    val prefetchUrls = remember(prefetchBooks) { prefetchBooks.mapNotNull { it.coverUrl } }
     val imageLoader = remember { SingletonImageLoader.get(context) }
+    val prefetchUrls = remember(prefetchBooks) {
+        prefetchBooks.mapNotNull { it.coverUrl }.joinToString("\u0001")
+    }
     LaunchedEffect(prefetchUrls) {
-        prefetchUrls.forEach { url ->
+        prefetchUrls.split('\u0001').filter { it.isNotEmpty() }.forEach { url ->
             imageLoader.enqueue(ImageRequest.Builder(context).data(url).build())
         }
     }
@@ -112,7 +112,6 @@ private fun BookGridItem(
     modifier: Modifier = Modifier,
     action: (@Composable () -> Unit)? = null,
 ) {
-    val context = LocalPlatformContext.current
     Column(
         modifier = modifier
             .clickable(onClick = onClick)
@@ -120,10 +119,7 @@ private fun BookGridItem(
     ) {
         Box {
             AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(book.coverUrl)
-                    .crossfade(true)
-                    .build(),
+                model = book.coverUrl,
                 contentDescription = book.title,
                 placeholder = CoverPlaceholder,
                 error = CoverError,
@@ -160,6 +156,8 @@ private fun BookGridItem(
         }
     }
 }
+
+private const val PREFETCH_COUNT = 4
 
 private val CoverPlaceholder = ColorPainter(Color(0xFFE8E6E3))
 private val CoverError = ColorPainter(Color(0xFFD2CFCC))

@@ -6,6 +6,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.yourapp.audiobook.source.api.Book
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
@@ -22,6 +24,11 @@ class HistoryStore(context: Context) {
 
     private val appContext = context.applicationContext
 
+    private val changeSignal = MutableSharedFlow<Unit>(extraBufferCapacity = 64)
+
+    /** Поток сигналов об изменении данных (для автосинхронизации). */
+    val changes: Flow<Unit> = changeSignal.asSharedFlow()
+
     val history: Flow<List<HistoryEntry>> = appContext.historyDataStore.data.map { prefs ->
         prefs[entriesKey]?.let(::decodeList).orEmpty()
     }
@@ -34,6 +41,7 @@ class HistoryStore(context: Context) {
                 current.filterNot { "${it.book.sourceId}:${it.book.id}" == bookKey }
             prefs[entriesKey] = encodeList(updated.take(MAX_ENTRIES))
         }
+        changeSignal.emit(Unit)
     }
 
     suspend fun remove(bookKey: String) {
@@ -43,10 +51,12 @@ class HistoryStore(context: Context) {
                 current.filterNot { "${it.book.sourceId}:${it.book.id}" == bookKey },
             )
         }
+        changeSignal.emit(Unit)
     }
 
     suspend fun clear() {
         appContext.historyDataStore.edit { it.remove(entriesKey) }
+        changeSignal.emit(Unit)
     }
 
     suspend fun snapshot(): List<HistoryEntry> =
@@ -58,6 +68,7 @@ class HistoryStore(context: Context) {
         appContext.historyDataStore.edit { prefs ->
             prefs[entriesKey] = encodeList(entries)
         }
+        changeSignal.emit(Unit)
     }
 
     private fun decodeList(raw: String): List<HistoryEntry> = runCatching {

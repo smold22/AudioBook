@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.yourapp.audiobook.AudioBookApplication
+import com.yourapp.audiobook.data.AuthorGender
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.ui.components.bookItems
 import kotlinx.coroutines.launch
@@ -45,9 +46,13 @@ fun HistoryScreen(navController: NavHostController) {
     var showClearConfirm by remember { mutableStateOf(false) }
     val history by app.historyStore.history.collectAsStateWithLifecycle(initialValue = emptyList())
     val deadKeys by app.deadBooksStore.deadKeys.collectAsStateWithLifecycle(initialValue = emptySet())
+    val hideFemaleAuthors by app.settingsStore.hideFemaleAuthors.collectAsStateWithLifecycle(initialValue = false)
     val viewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
-    val visibleHistory = remember(history, deadKeys) {
-        history.filterNot { "${it.book.sourceId}:${it.book.id}" in deadKeys }
+    val visibleHistory = remember(history, deadKeys, hideFemaleAuthors) {
+        AuthorGender.filterFemale(
+            history.map { it.book }.filterNot { "${it.sourceId}:${it.id}" in deadKeys },
+            hideFemaleAuthors,
+        )
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -91,7 +96,7 @@ fun HistoryScreen(navController: NavHostController) {
                 modifier = Modifier.fillMaxSize(),
             ) {
                 bookItems(
-                    books = visibleHistory.map { it.book },
+                    books = visibleHistory,
                     viewMode = viewMode,
                     onBookClick = { book ->
                         navController.navigate("book/${Uri.encode(app.bookCache.keyOf(book))}")

@@ -6,6 +6,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.yourapp.audiobook.AudioBookApplication
+import com.yourapp.audiobook.data.AuthorGender
 import com.yourapp.audiobook.data.TrackPosition
 import com.yourapp.audiobook.player.PlaybackService
 import com.yourapp.audiobook.source.api.Book
@@ -14,6 +15,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -63,6 +65,7 @@ class BookViewModel(app: Application, private val bookKey: String) : AndroidView
     fun load() {
         viewModelScope.launch {
             _state.update { it.copy(loading = true, error = null) }
+            val hideFemale = appContext.settingsStore.hideFemaleAuthors.first()
             val offline = runCatching { appContext.downloadManager.offlineDetails(bookKey) }.getOrNull()
             if (offline != null) {
                 val book = offline.book.copy(title = offline.book.title.ifBlank { _state.value.book?.title.orEmpty() })
@@ -80,8 +83,8 @@ class BookViewModel(app: Application, private val bookKey: String) : AndroidView
                         loading = false,
                         progress = progress,
                         currentTrackIndex = currentIndex,
-                        related = offline.related,
-                        seriesBooks = offline.seriesBooks,
+                        related = AuthorGender.filterFemale(offline.related, hideFemale),
+                        seriesBooks = AuthorGender.filterFemale(offline.seriesBooks, hideFemale),
                     )
                 }
                 return@launch
@@ -113,13 +116,15 @@ class BookViewModel(app: Application, private val bookKey: String) : AndroidView
                 )
                 val newDetails = details.copy(book = merged)
                 appContext.bookCache.put(merged)
-                val related = newDetails.related
-                    .filterNot { it.url == merged.url }
-                    .onEach { appContext.bookCache.put(it) }
-                val seriesBooks = newDetails.seriesBooks
-                    .filterNot { it.url == merged.url }
-                    .sortedWith(compareBy<Book> { it.seriesIndex == null }.thenBy { it.seriesIndex })
-                    .onEach { appContext.bookCache.put(it) }
+                val related = AuthorGender.filterFemale(
+                    newDetails.related.filterNot { it.url == merged.url },
+                    hideFemale,
+                ).onEach { appContext.bookCache.put(it) }
+                val seriesBooks = AuthorGender.filterFemale(
+                    newDetails.seriesBooks.filterNot { it.url == merged.url }
+                        .sortedWith(compareBy<Book> { it.seriesIndex == null }.thenBy { it.seriesIndex }),
+                    hideFemale,
+                ).onEach { appContext.bookCache.put(it) }
                 val progress = appContext.progressStore.load(merged.id)
                 val currentIndex = appContext.playerController.player.currentMediaItemIndex
                     .takeIf { appContext.playerController.player.mediaItemCount > 0 && appContext.playerController.nowPlaying.value?.book?.id == merged.id }

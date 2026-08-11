@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -33,13 +35,17 @@ import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.PersonOff
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Send
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.ViewModule
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
@@ -63,6 +69,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.codekidlabs.storagechooser.Content
 import com.codekidlabs.storagechooser.StorageChooser
+import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.yourapp.audiobook.AudioBookApplication
 import com.yourapp.audiobook.data.IgnoreSection
 import com.yourapp.audiobook.data.LogCollector
@@ -217,6 +224,31 @@ fun SettingsScreen(navController: NavHostController) {
     val viewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
     val hideTabLabels by app.settingsStore.hideTabLabels.collectAsStateWithLifecycle(initialValue = false)
     val fontMode by app.settingsStore.fontScale.collectAsStateWithLifecycle(initialValue = SettingsStore.FONT_MEDIUM)
+    val hideFemaleAuthors by app.settingsStore.hideFemaleAuthors.collectAsStateWithLifecycle(initialValue = false)
+    val syncState by app.syncManager.state.collectAsStateWithLifecycle()
+    val signInClient = remember {
+        runCatching { app.syncManager.buildSignInClient() }.getOrNull()
+    }
+    val signInLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val data = result.data ?: return@rememberLauncherForActivityResult
+            runCatching {
+                GoogleSignIn.getSignedInAccountFromIntent(data).getResult()
+            }.onSuccess { account ->
+                app.syncManager.onSignInOK(account)
+            }.onFailure {
+                app.syncManager.onSignInError(it)
+            }
+        }
+    }
+    val lastSyncLabel = remember(syncState.lastSyncAtMs) {
+        syncState.lastSyncAtMs?.let { ts ->
+            val format = java.text.SimpleDateFormat("dd.MM HH:mm", java.util.Locale.getDefault())
+            "Последняя синхронизация: ${format.format(java.util.Date(ts))}"
+        }
+    }
     val versionName = remember {
         runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
@@ -616,6 +648,26 @@ fun SettingsScreen(navController: NavHostController) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Скрывать авторов-женщин", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Определяется по имени и фамилии (например, Анна Иванова). Возможны ошибки на редких именах",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = hideFemaleAuthors,
+                onCheckedChange = { scope.launch { app.settingsStore.setHideFemaleAuthors(it) } },
+            )
+        }
+        HorizontalDivider()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
                 .clickable(enabled = !backupBusy) { onBackupClick() }
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -655,6 +707,68 @@ fun SettingsScreen(navController: NavHostController) {
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
+        }
+        HorizontalDivider()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Синхронизация с Google", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    when {
+                        signInClient == null -> "Google Play Services не обнаружены на устройстве"
+                        syncState.syncing -> "Синхронизирую..."
+                        syncState.signedIn -> lastSyncLabel ?: "Синхронизация ещё не выполнялась"
+                        else -> "Избранное, история, прогресс, закладки и настройки через Cloud Firestore"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(Icons.Outlined.Sync, contentDescription = null)
+        }
+        syncState.lastError?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (!syncState.signedIn) {
+                OutlinedButton(
+                    enabled = signInClient != null && !syncState.syncing,
+                    onClick = {
+                        signInClient?.signInIntent?.let { signInLauncher.launch(it) }
+                    },
+                ) {
+                    Text("Войти в Google")
+                }
+            } else {
+                Button(
+                    enabled = !syncState.syncing,
+                    onClick = { app.syncManager.syncNow() },
+                ) {
+                    Text(if (syncState.syncing) "Синхронизирую..." else "Синхронизировать сейчас")
+                }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { app.syncManager.signOut() }) {
+                    Text("Выйти")
+                }
+            }
+            if (syncState.syncing) {
+                Spacer(Modifier.width(12.dp))
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            }
         }
         HorizontalDivider()
         Row(
