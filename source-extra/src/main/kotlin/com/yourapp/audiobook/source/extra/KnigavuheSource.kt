@@ -173,8 +173,9 @@ class KnigaVuheSource(
             val start = raw.indexOf("new BookPlayer")
             if (start < 0) continue
             val jsonStart = raw.indexOf('[', start)
+            if (jsonStart < 0) continue
             val jsonEnd = findJsonEnd(raw, jsonStart)
-            if (jsonStart < 0 || jsonEnd < 0) continue
+            if (jsonEnd < 0) continue
             return parseTrackArray(raw.substring(jsonStart, jsonEnd + 1))
         }
         return emptyList()
@@ -216,7 +217,7 @@ class KnigaVuheSource(
                 result += AudioTrack(
                     title = title,
                     url = url,
-                    durationSeconds = obj.get("duration")?.asInt,
+                    durationSeconds = obj.get("duration")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asInt,
                 )
             }
         } catch (_: Exception) {

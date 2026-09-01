@@ -52,7 +52,9 @@ fun SearchScreen(navController: NavHostController) {
     val viewModel: SearchViewModel = viewModel()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
-    val viewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
+    val rawViewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
+    // Сетка в 3 столбца доступна только в горизонтальном режиме и на Android TV.
+    val viewMode = if (rawViewMode == SettingsStore.VIEW_GRID3 && !isLandscapeOrTv) SettingsStore.VIEW_GRID else rawViewMode
     val sources = app.sourceRegistry.sources
     var query by remember { mutableStateOf("") }
     var selectedSourceId by remember { mutableStateOf<String?>(null) }
@@ -61,12 +63,12 @@ fun SearchScreen(navController: NavHostController) {
     val shouldLoadMore by remember {
         derivedStateOf {
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            val displayCount = if (viewMode == SettingsStore.VIEW_GRID) {
-                (state.books.size + 1) / 2
-            } else {
-                state.books.size
+            val displayCount = when (viewMode) {
+                SettingsStore.VIEW_GRID3 -> (state.books.size + 2) / 3
+                SettingsStore.VIEW_GRID -> (state.books.size + 1) / 2
+                else -> state.books.size
             }
-            lastVisible >= (displayCount - 3)
+            displayCount >= 5 && lastVisible >= (displayCount - 3)
         }
     }
     LaunchedEffect(shouldLoadMore, state.books.size) {

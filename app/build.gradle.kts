@@ -24,7 +24,7 @@ android {
         minSdk = 24
         targetSdk = 37
         versionCode = 2
-        versionName = "1.1.8"
+        versionName = "1.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -83,6 +83,13 @@ dependencies {
     implementation(libs.firebase.firestore)
     coreLibraryDesugaring(libs.desugar.jdk.libs)
     implementation(project(":storagechooser"))
+
+    // Торрент-движок (libtorrent4j, libtorrent 2.1): ядро + нативные библиотеки по ABI.
+    implementation("org.libtorrent4j:libtorrent4j:2.1.0-35")
+    implementation("org.libtorrent4j:libtorrent4j-android-arm:2.1.0-35")
+    implementation("org.libtorrent4j:libtorrent4j-android-arm64:2.1.0-35")
+    implementation("org.libtorrent4j:libtorrent4j-android-x86:2.1.0-35")
+    implementation("org.libtorrent4j:libtorrent4j-android-x86_64:2.1.0-35")
 
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)

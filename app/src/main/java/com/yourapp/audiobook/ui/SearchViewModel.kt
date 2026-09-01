@@ -26,10 +26,23 @@ class SearchViewModel(app: Application) : BookListViewModel(app) {
     override suspend fun loadPage(page: Int): List<Book> {
         if (query.isBlank()) return emptyList()
         val target = sourceId
-        return if (target == null) {
+        val results = if (target == null) {
             appContext.searchAll(query, page)
         } else {
             appContext.sourceRegistry.get(target)?.search(query, page).orEmpty()
         }
+        return results.filter(::matchesQuery)
+    }
+
+    /** Оставляет только книги, релевантные запросу: все слова запроса встречаются в названии или авторе. */
+    private fun matchesQuery(book: Book): Boolean {
+        if (query.isBlank()) return true
+        val words = query.lowercase().split(Regex("\\s+")).filter { it.length >= 2 }
+        if (words.isEmpty()) return true
+        val haystack = buildString {
+            append(book.title.lowercase())
+            book.author?.let { append(' ').append(it.lowercase()) }
+        }
+        return words.all { haystack.contains(it) }
     }
 }

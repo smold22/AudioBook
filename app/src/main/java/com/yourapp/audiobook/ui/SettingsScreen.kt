@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -17,9 +18,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -27,6 +27,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material.icons.outlined.FilterAltOff
@@ -35,17 +36,15 @@ import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.PersonOff
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Send
-import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.ViewModule
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
@@ -59,6 +58,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -69,8 +69,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.codekidlabs.storagechooser.Content
 import com.codekidlabs.storagechooser.StorageChooser
-import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.yourapp.audiobook.AudioBookApplication
+import com.yourapp.audiobook.UiModeRouter
 import com.yourapp.audiobook.data.IgnoreSection
 import com.yourapp.audiobook.data.LogCollector
 import com.yourapp.audiobook.data.SettingsStore
@@ -96,6 +96,12 @@ private val fontOptions = listOf(
     SettingsStore.FONT_LARGE to "Большой",
 )
 
+private val underlayOptions = listOf(
+    SettingsStore.TAB_UNDERLAY_LOW to "Низкая",
+    SettingsStore.TAB_UNDERLAY_DEFAULT to "Стандартная",
+    SettingsStore.TAB_UNDERLAY_HIGH to "Высокая",
+)
+
 private enum class BackupAction { BACKUP, RESTORE }
 
 @Composable
@@ -109,6 +115,7 @@ private fun IgnoreListRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
+            .tvFocus()
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -205,6 +212,9 @@ fun SettingsScreen(navController: NavHostController) {
     var showThemeDialog by remember { mutableStateOf(false) }
     var showViewDialog by remember { mutableStateOf(false) }
     var showFontDialog by remember { mutableStateOf(false) }
+    var showUnderlayDialog by remember { mutableStateOf(false) }
+    var showUiModeDialog by remember { mutableStateOf(false) }
+    var showSourcesDialog by remember { mutableStateOf(false) }
     var showRestoreConfirm by remember { mutableStateOf(false) }
     var pendingRestorePath by remember { mutableStateOf<String?>(null) }
     var backupBusy by remember { mutableStateOf(false) }
@@ -219,36 +229,21 @@ fun SettingsScreen(navController: NavHostController) {
         .collectAsStateWithLifecycle(initialValue = emptySet())
     val ignoredReaders by app.settingsStore.ignoredFlow(IgnoreSection.READER)
         .collectAsStateWithLifecycle(initialValue = emptySet())
+    val hiddenSources by app.settingsStore.hiddenSources.collectAsStateWithLifecycle(initialValue = emptySet())
     val themeMode by app.settingsStore.themeMode.collectAsStateWithLifecycle(initialValue = SettingsStore.THEME_SYSTEM)
+    val uiMode by app.settingsStore.uiMode.collectAsStateWithLifecycle(initialValue = SettingsStore.UI_MODE_AUTO)
     val resumeOnLaunch by app.settingsStore.resumeOnLaunch.collectAsStateWithLifecycle(initialValue = false)
-    val viewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
+    val openPlayerOnLaunch by app.settingsStore.openPlayerOnLaunch.collectAsStateWithLifecycle(initialValue = false)
+    val viewModeRaw by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
+    // Сетка в 3 столбца доступна только в горизонтальном режиме и на Android TV;
+    // в портретном режиме такая настройка отображается как обычная сетка.
+    val wideView = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE || isTvMode
+    val viewMode = if (viewModeRaw == SettingsStore.VIEW_GRID3 && !wideView) SettingsStore.VIEW_GRID else viewModeRaw
     val hideTabLabels by app.settingsStore.hideTabLabels.collectAsStateWithLifecycle(initialValue = false)
     val fontMode by app.settingsStore.fontScale.collectAsStateWithLifecycle(initialValue = SettingsStore.FONT_MEDIUM)
+    val tabUnderlayHeight by app.settingsStore.tabUnderlayHeight.collectAsStateWithLifecycle(initialValue = SettingsStore.TAB_UNDERLAY_DEFAULT)
     val hideFemaleAuthors by app.settingsStore.hideFemaleAuthors.collectAsStateWithLifecycle(initialValue = false)
-    val syncState by app.syncManager.state.collectAsStateWithLifecycle()
-    val signInClient = remember {
-        runCatching { app.syncManager.buildSignInClient() }.getOrNull()
-    }
-    val signInLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val data = result.data ?: return@rememberLauncherForActivityResult
-            runCatching {
-                GoogleSignIn.getSignedInAccountFromIntent(data).getResult()
-            }.onSuccess { account ->
-                app.syncManager.onSignInOK(account)
-            }.onFailure {
-                app.syncManager.onSignInError(it)
-            }
-        }
-    }
-    val lastSyncLabel = remember(syncState.lastSyncAtMs) {
-        syncState.lastSyncAtMs?.let { ts ->
-            val format = java.text.SimpleDateFormat("dd.MM HH:mm", java.util.Locale.getDefault())
-            "Последняя синхронизация: ${format.format(java.util.Date(ts))}"
-        }
-    }
+    val closeOnBackLongPress by app.settingsStore.closeOnBackLongPress.collectAsStateWithLifecycle(initialValue = false)
     val versionName = remember {
         runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
@@ -445,6 +440,12 @@ fun SettingsScreen(navController: NavHostController) {
     val themeLabel = themeOptions.firstOrNull { it.first == themeMode }?.second ?: "Системная"
     val viewLabel = viewOptions.firstOrNull { it.first == viewMode }?.second ?: "Список"
     val fontLabel = fontOptions.firstOrNull { it.first == fontMode }?.second ?: "Средний"
+    val underlayLabel = underlayOptions.firstOrNull { it.first == tabUnderlayHeight }?.second ?: "Стандартная"
+    val uiModeLabel = when (uiMode) {
+        SettingsStore.UI_MODE_TV -> "Android TV (пульт ДУ)"
+        SettingsStore.UI_MODE_TOUCH -> "Сенсорный экран"
+        else -> "Авто (по типу устройства)"
+    }
 
     fun sendLogs() {
         if (logsBusy) return
@@ -516,6 +517,7 @@ fun SettingsScreen(navController: NavHostController) {
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { pickFolder.launch(null) }
+                .tvFocus()
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -534,6 +536,7 @@ fun SettingsScreen(navController: NavHostController) {
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { showThemeDialog = true }
+                .tvFocus()
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -551,7 +554,27 @@ fun SettingsScreen(navController: NavHostController) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .clickable { showUiModeDialog = true }
+                .tvFocus()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Режим управления", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    uiModeLabel,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(Icons.Filled.Tv, contentDescription = null)
+        }
+        HorizontalDivider()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
                 .clickable { showViewDialog = true }
+                .tvFocus()
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -590,6 +613,7 @@ fun SettingsScreen(navController: NavHostController) {
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { showFontDialog = true }
+                .tvFocus()
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -602,6 +626,25 @@ fun SettingsScreen(navController: NavHostController) {
                 )
             }
             Icon(Icons.Outlined.TextFields, contentDescription = null)
+        }
+        HorizontalDivider()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showUnderlayDialog = true }
+                .tvFocus()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Высота подложки вкладок", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    underlayLabel,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(Icons.Outlined.ViewModule, contentDescription = null)
         }
         HorizontalDivider()
         Row(
@@ -624,6 +667,46 @@ fun SettingsScreen(navController: NavHostController) {
             )
         }
         HorizontalDivider()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Открывать окно плеера при запуске", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "При открытии приложения сразу откроется экран плеера, если что-то играет",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = openPlayerOnLaunch,
+                onCheckedChange = { scope.launch { app.settingsStore.setOpenPlayerOnLaunch(it) } },
+            )
+        }
+        HorizontalDivider()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Закрывать приложение нажатием «Назад»", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Нажатие «Назад» на главных экранах полностью закроет приложение",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = closeOnBackLongPress,
+                onCheckedChange = { scope.launch { app.settingsStore.setCloseOnBackLongPress(it) } },
+            )
+        }
+        HorizontalDivider()
         IgnoreListRow(
             label = "Скрывать жанры",
             subtitle = if (ignoredGenres.isEmpty()) "Книги таких жанров не показывать" else "В списке: ${ignoredGenres.size}",
@@ -643,6 +726,13 @@ fun SettingsScreen(navController: NavHostController) {
             subtitle = if (ignoredReaders.isEmpty()) "Книги с такими чтецами не показывать" else "В списке: ${ignoredReaders.size}",
             icon = { Icon(Icons.Outlined.Hearing, contentDescription = null) },
             onClick = { ignoreSection = IgnoreSection.READER },
+        )
+        HorizontalDivider()
+        IgnoreListRow(
+            label = "Скрывать источники",
+            subtitle = if (hiddenSources.isEmpty()) "Скрытые источники не использовать" else "Скрыто: ${hiddenSources.size}",
+            icon = { Icon(Icons.Outlined.VisibilityOff, contentDescription = null) },
+            onClick = { showSourcesDialog = true },
         )
         HorizontalDivider()
         Row(
@@ -669,6 +759,7 @@ fun SettingsScreen(navController: NavHostController) {
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(enabled = !backupBusy) { onBackupClick() }
+                .tvFocus()
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -687,6 +778,7 @@ fun SettingsScreen(navController: NavHostController) {
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(enabled = !backupBusy) { onRestoreClick() }
+                .tvFocus()
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -712,69 +804,8 @@ fun SettingsScreen(navController: NavHostController) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Синхронизация с Google", style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    when {
-                        signInClient == null -> "Google Play Services не обнаружены на устройстве"
-                        syncState.syncing -> "Синхронизирую..."
-                        syncState.signedIn -> lastSyncLabel ?: "Синхронизация ещё не выполнялась"
-                        else -> "Избранное, история, прогресс, закладки и настройки через Cloud Firestore"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Icon(Icons.Outlined.Sync, contentDescription = null)
-        }
-        syncState.lastError?.let {
-            Text(
-                it,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(horizontal = 16.dp),
-            )
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (!syncState.signedIn) {
-                OutlinedButton(
-                    enabled = signInClient != null && !syncState.syncing,
-                    onClick = {
-                        signInClient?.signInIntent?.let { signInLauncher.launch(it) }
-                    },
-                ) {
-                    Text("Войти в Google")
-                }
-            } else {
-                Button(
-                    enabled = !syncState.syncing,
-                    onClick = { app.syncManager.syncNow() },
-                ) {
-                    Text(if (syncState.syncing) "Синхронизирую..." else "Синхронизировать сейчас")
-                }
-                Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = { app.syncManager.signOut() }) {
-                    Text("Выйти")
-                }
-            }
-            if (syncState.syncing) {
-                Spacer(Modifier.width(12.dp))
-                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-            }
-        }
-        HorizontalDivider()
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
                 .clickable(enabled = !logsBusy) { sendLogs() }
+                .tvFocus()
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -802,6 +833,7 @@ fun SettingsScreen(navController: NavHostController) {
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { showCacheConfirm = true }
+                .tvFocus()
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -828,6 +860,7 @@ fun SettingsScreen(navController: NavHostController) {
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { showClearConfirm = true }
+                .tvFocus()
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -878,6 +911,7 @@ fun SettingsScreen(navController: NavHostController) {
                                 .clickable {
                                     scope.launch { app.settingsStore.setThemeMode(mode) }
                                 }
+                                .tvFocus()
                                 .padding(vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -904,13 +938,19 @@ fun SettingsScreen(navController: NavHostController) {
             title = { Text("Вид") },
             text = {
                 Column {
-                    viewOptions.forEach { (mode, label) ->
+                    val options = if (wideView) {
+                        viewOptions + (SettingsStore.VIEW_GRID3 to "Сетка в 3 столбца")
+                    } else {
+                        viewOptions
+                    }
+                    options.forEach { (mode, label) ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
                                     scope.launch { app.settingsStore.setViewMode(mode) }
                                 }
+                                .tvFocus()
                                 .padding(vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -944,6 +984,7 @@ fun SettingsScreen(navController: NavHostController) {
                                 .clickable {
                                     scope.launch { app.settingsStore.setFontScale(mode) }
                                 }
+                                .tvFocus()
                                 .padding(vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -958,6 +999,155 @@ fun SettingsScreen(navController: NavHostController) {
             },
             confirmButton = {
                 TextButton(onClick = { showFontDialog = false }) {
+                    Text("Готово")
+                }
+            },
+        )
+    }
+
+    if (showUnderlayDialog) {
+        AlertDialog(
+            onDismissRequest = { showUnderlayDialog = false },
+            title = { Text("Высота подложки вкладок") },
+            text = {
+                Column {
+                    underlayOptions.forEach { (mode, label) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    scope.launch { app.settingsStore.setTabUnderlayHeight(mode) }
+                                }
+                                .tvFocus()
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                            RadioButton(
+                                selected = tabUnderlayHeight == mode,
+                                onClick = { scope.launch { app.settingsStore.setTabUnderlayHeight(mode) } },
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showUnderlayDialog = false }) {
+                    Text("Готово")
+                }
+            },
+        )
+    }
+
+    if (showUiModeDialog) {
+        AlertDialog(
+            onDismissRequest = { showUiModeDialog = false },
+            title = { Text("Режим управления") },
+            text = {
+                Column {
+                    val options = listOf(
+                        SettingsStore.UI_MODE_AUTO to "Авто (по типу устройства)",
+                        SettingsStore.UI_MODE_TOUCH to "Сенсорный экран",
+                        SettingsStore.UI_MODE_TV to "Android TV (пульт ДУ)",
+                    )
+                    options.forEach { (mode, label) ->
+                        val switchMode = {
+                            scope.launch {
+                                if (mode != uiMode) {
+                                    app.settingsStore.setUiMode(mode)
+                                    UiModeRouter.launchForMode(context, mode)
+                                }
+                            }
+                            showUiModeDialog = false
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(onClick = switchMode)
+                                .tvFocus()
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                            RadioButton(
+                                selected = uiMode == mode || (uiMode == null && mode == SettingsStore.UI_MODE_AUTO),
+                                onClick = switchMode,
+                            )
+                        }
+                    }
+                    Text(
+                        "В режиме «Авто» тип определяется по устройству (Android TV — пульт ДУ, остальные — сенсорный экран). " +
+                            "В ТВ-режиме элементы получают синюю обводку при навигации с пульта.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showUiModeDialog = false }) {
+                    Text("Готово")
+                }
+            },
+        )
+    }
+
+    if (showSourcesDialog) {
+        AlertDialog(
+            onDismissRequest = { showSourcesDialog = false },
+            title = { Text("Скрывать источники") },
+            text = {
+                Column {
+                    val sources = app.sourceRegistry.sources
+                    if (sources.isEmpty()) {
+                        Text(
+                            "Источники не зарегистрированы",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 360.dp)
+                                .verticalScroll(rememberScrollState()),
+                        ) {
+                            sources.forEach { source ->
+                                val hidden = source.id in hiddenSources
+                                val toggle: () -> Unit = {
+                                    scope.launch { app.settingsStore.setSourceHidden(source.id, !hidden) }
+                                }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable(onClick = toggle)
+                                        .tvFocus()
+                                        .padding(vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        source.name,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Checkbox(
+                                        checked = !hidden,
+                                        onCheckedChange = { toggle() },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Скрытые источники не участвуют в поиске и не могут быть выбраны. " +
+                            "На экране «Источники» они показаны затемнёнными.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSourcesDialog = false }) {
                     Text("Готово")
                 }
             },

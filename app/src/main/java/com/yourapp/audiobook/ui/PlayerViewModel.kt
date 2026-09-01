@@ -80,6 +80,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun cycleSpeed(): Float = controller.cycleSpeed()
 
+    fun setSpeed(speed: Float) = controller.setSpeed(speed)
+
     private fun updateSnapshot() {
         val player = controller.player
         val position = player.currentPosition

@@ -96,7 +96,7 @@ class AudioknigiProSource(
         val target = when {
             page <= 1 -> url
             Regex("""/page/\d+/""").containsMatchIn(url) ->
-                url.replace(Regex("""/page/\d+/"""), "/page/$page/")
+                url.replace(Regex("""/page/\d+/""")) { "/page/$page/" }
             else -> url.trimEnd('/') + "/page/$page/"
         }
         return parseBooks(getHtml(client, target))

@@ -21,20 +21,31 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.yourapp.audiobook.AudioBookApplication
 import com.yourapp.audiobook.source.api.Book
+import com.yourapp.audiobook.ui.rememberAppImageLoader
+import com.yourapp.audiobook.ui.tvFocus
 
 private val CoverPlaceholder = ColorPainter(Color(0xFFE8E6E3))
 private val CoverError = ColorPainter(Color(0xFFD2CFCC))
 
 @Composable
+internal fun sourceName(book: Book): String? =
+    (LocalContext.current.applicationContext as? AudioBookApplication)
+        ?.sourceRegistry?.get(book.sourceId)?.name
+
+@Composable
 fun BookCard(book: Book, onClick: () -> Unit) {
+    val imageLoader = rememberAppImageLoader()
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
+            .tvFocus()
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -43,6 +54,7 @@ fun BookCard(book: Book, onClick: () -> Unit) {
             contentDescription = book.title,
             placeholder = CoverPlaceholder,
             error = CoverError,
+            imageLoader = imageLoader,
             modifier = Modifier
                 .size(78.dp)
                 .clip(RoundedCornerShape(8.dp)),
@@ -70,6 +82,13 @@ fun BookCard(book: Book, onClick: () -> Unit) {
                     text = it,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            sourceName(book)?.let {
+                Text(
+                    text = "Источник: $it",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary,
                 )
             }
             book.author?.let {

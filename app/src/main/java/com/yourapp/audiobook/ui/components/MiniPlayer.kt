@@ -28,6 +28,8 @@ import androidx.compose.ui.unit.dp
 import androidx.media3.exoplayer.ExoPlayer
 import coil3.compose.AsyncImage
 import com.yourapp.audiobook.player.NowPlaying
+import com.yourapp.audiobook.ui.rememberAppImageLoader
+import com.yourapp.audiobook.ui.tvFocus
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
@@ -51,16 +53,19 @@ fun MiniPlayer(
     onToggle: () -> Unit,
 ) {
     val isPlaying = rememberIsPlaying(player)
+    val imageLoader = rememberAppImageLoader()
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
+            .tvFocus()
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AsyncImage(
             model = nowPlaying.book.coverUrl,
             contentDescription = nowPlaying.book.title,
+            imageLoader = imageLoader,
             modifier = Modifier.size(44.dp),
         )
         Spacer(Modifier.width(12.dp))

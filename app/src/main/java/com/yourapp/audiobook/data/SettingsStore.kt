@@ -18,6 +18,10 @@ class SettingsStore(context: Context) {
 
     private val appContext = context.applicationContext
 
+    /** Быстрое зеркало режима управления для мгновенного роутинга при запуске. */
+    private val uiModeMirror =
+        appContext.getSharedPreferences("ui_mode_mirror", Context.MODE_PRIVATE)
+
     private val changeSignal = MutableSharedFlow<Unit>(extraBufferCapacity = 64)
 
     /** Поток сигналов об изменении настроек (для автосинхронизации). */
@@ -27,10 +31,15 @@ class SettingsStore(context: Context) {
     private val themeKey = stringPreferencesKey("theme")
     private val sourceKey = stringPreferencesKey("source_id")
     private val resumeOnLaunchKey = booleanPreferencesKey("resume_on_launch")
+    private val openPlayerOnLaunchKey = booleanPreferencesKey("open_player_on_launch")
     private val viewModeKey = stringPreferencesKey("view_mode")
     private val hideTabLabelsKey = booleanPreferencesKey("hide_tab_labels")
+    private val tabUnderlayHeightKey = stringPreferencesKey("tab_underlay_height")
     private val fontScaleKey = stringPreferencesKey("font_scale")
     private val hideFemaleAuthorsKey = booleanPreferencesKey("hide_female_authors")
+    private val closeOnBackLongPressKey = booleanPreferencesKey("close_on_back_long_press")
+    private val uiModeKey = stringPreferencesKey("ui_mode")
+    private val hiddenSourcesKey = stringSetPreferencesKey("hidden_sources")
 
     val downloadFolder: Flow<String?> =
         appContext.settingsDataStore.data.map { it[folderKey] }
@@ -44,11 +53,17 @@ class SettingsStore(context: Context) {
     val resumeOnLaunch: Flow<Boolean> =
         appContext.settingsDataStore.data.map { it[resumeOnLaunchKey] ?: false }
 
+    val openPlayerOnLaunch: Flow<Boolean> =
+        appContext.settingsDataStore.data.map { it[openPlayerOnLaunchKey] ?: false }
+
     val viewMode: Flow<String> =
         appContext.settingsDataStore.data.map { it[viewModeKey] ?: VIEW_LIST }
 
     val hideTabLabels: Flow<Boolean> =
         appContext.settingsDataStore.data.map { it[hideTabLabelsKey] ?: false }
+
+    val tabUnderlayHeight: Flow<String> =
+        appContext.settingsDataStore.data.map { it[tabUnderlayHeightKey] ?: TAB_UNDERLAY_DEFAULT }
 
     val fontScale: Flow<String> =
         appContext.settingsDataStore.data.map { it[fontScaleKey] ?: FONT_MEDIUM }
@@ -56,9 +71,26 @@ class SettingsStore(context: Context) {
     val hideFemaleAuthors: Flow<Boolean> =
         appContext.settingsDataStore.data.map { it[hideFemaleAuthorsKey] ?: false }
 
+    val closeOnBackLongPress: Flow<Boolean> =
+        appContext.settingsDataStore.data.map { it[closeOnBackLongPressKey] ?: false }
+
+    val uiMode: Flow<String?> =
+        appContext.settingsDataStore.data.map { it[uiModeKey] }
+
+    /** Идентификаторы скрытых источников. */
+    val hiddenSources: Flow<Set<String>> =
+        appContext.settingsDataStore.data.map { it[hiddenSourcesKey].orEmpty() }
+
     suspend fun setResumeOnLaunch(enabled: Boolean) {
         appContext.settingsDataStore.edit { prefs ->
             prefs[resumeOnLaunchKey] = enabled
+        }
+        changeSignal.emit(Unit)
+    }
+
+    suspend fun setOpenPlayerOnLaunch(enabled: Boolean) {
+        appContext.settingsDataStore.edit { prefs ->
+            prefs[openPlayerOnLaunchKey] = enabled
         }
         changeSignal.emit(Unit)
     }
@@ -77,6 +109,13 @@ class SettingsStore(context: Context) {
         changeSignal.emit(Unit)
     }
 
+    suspend fun setTabUnderlayHeight(mode: String) {
+        appContext.settingsDataStore.edit { prefs ->
+            prefs[tabUnderlayHeightKey] = mode
+        }
+        changeSignal.emit(Unit)
+    }
+
     suspend fun setFontScale(mode: String) {
         appContext.settingsDataStore.edit { prefs ->
             prefs[fontScaleKey] = mode
@@ -90,6 +129,46 @@ class SettingsStore(context: Context) {
         }
         changeSignal.emit(Unit)
     }
+
+    suspend fun setCloseOnBackLongPress(enabled: Boolean) {
+        appContext.settingsDataStore.edit { prefs ->
+            prefs[closeOnBackLongPressKey] = enabled
+        }
+        changeSignal.emit(Unit)
+    }
+
+    suspend fun setUiMode(mode: String) {
+        appContext.settingsDataStore.edit { prefs ->
+            prefs[uiModeKey] = mode
+        }
+        uiModeMirror.edit().putString("ui_mode", mode).apply()
+        changeSignal.emit(Unit)
+    }
+
+    suspend fun currentUiMode(): String? {
+        val mode = appContext.settingsDataStore.data.first()[uiModeKey]
+        if (mode != null) {
+            uiModeMirror.edit().putString("ui_mode", mode).apply()
+        }
+        return mode
+    }
+
+    suspend fun hiddenSourceIds(): Set<String> =
+        appContext.settingsDataStore.data.first()[hiddenSourcesKey].orEmpty()
+
+    suspend fun setSourceHidden(id: String, hidden: Boolean) {
+        appContext.settingsDataStore.edit { prefs ->
+            prefs[hiddenSourcesKey] = if (hidden) {
+                prefs[hiddenSourcesKey].orEmpty() + id
+            } else {
+                prefs[hiddenSourcesKey].orEmpty() - id
+            }
+        }
+        changeSignal.emit(Unit)
+    }
+
+    /** Синхронное чтение режима управления (без ожидания DataStore). */
+    fun cachedUiMode(): String? = uiModeMirror.getString("ui_mode", null)
 
     suspend fun currentSourceId(): String? =
         appContext.settingsDataStore.data.first()[sourceKey]
@@ -193,15 +272,20 @@ class SettingsStore(context: Context) {
     /** Снимок всех синхронизируемых настроек (без путей к скачанным файлам). */
     suspend fun snapshotAll(): Map<String, String> {
         val prefs = appContext.settingsDataStore.data.first()
-        return prefs.asMap().entries
-            .filter { (key, value) ->
-                val name = key.name
-                value is String &&
-                    name != downloadFolderName &&
-                    !name.startsWith(bookFolderPrefix) &&
-                    !name.startsWith(bookMetaPrefix)
+        val result = mutableMapOf<String, String>()
+        prefs.asMap().forEach { (key, value) ->
+            val name = key.name
+            if (name == downloadFolderName || name.startsWith(bookFolderPrefix) || name.startsWith(bookMetaPrefix)) {
+                return@forEach
             }
-            .associate { (key, value) -> key.name to value as String }
+            when (value) {
+                is String -> result[name] = value
+                is Boolean -> result[name] = value.toString()
+                is Set<*> -> result[name] = value.joinToString(SET_ITEM_SEPARATOR)
+                else -> Unit
+            }
+        }
+        return result
     }
 
     /** Применяет снимок настроек, пропуская ключи, специфичные для устройства. */
@@ -209,11 +293,16 @@ class SettingsStore(context: Context) {
         if (snapshot.isEmpty()) return
         appContext.settingsDataStore.edit { prefs ->
             snapshot.forEach { (name, value) ->
-                if (name != downloadFolderName &&
-                    !name.startsWith(bookFolderPrefix) &&
-                    !name.startsWith(bookMetaPrefix)
-                ) {
-                    prefs[stringPreferencesKey(name)] = value
+                if (name == downloadFolderName || name.startsWith(bookFolderPrefix) || name.startsWith(bookMetaPrefix)) {
+                    return@forEach
+                }
+                when (name) {
+                    resumeOnLaunchKey.name, openPlayerOnLaunchKey.name, hideTabLabelsKey.name, hideFemaleAuthorsKey.name, closeOnBackLongPressKey.name ->
+                        prefs[booleanPreferencesKey(name)] = value.toBooleanStrictOrNull() ?: false
+                    IgnoreSection.GENRE.key, IgnoreSection.AUTHOR.key, IgnoreSection.READER.key, hiddenSourcesKey.name ->
+                        prefs[stringSetPreferencesKey(name)] =
+                            value.split(SET_ITEM_SEPARATOR).filter { it.isNotEmpty() }.toSet()
+                    else -> prefs[stringPreferencesKey(name)] = value
                 }
             }
         }
@@ -227,10 +316,21 @@ class SettingsStore(context: Context) {
 
         const val VIEW_LIST = "list"
         const val VIEW_GRID = "grid"
+        const val VIEW_GRID3 = "grid3"
 
         const val FONT_SMALL = "small"
         const val FONT_MEDIUM = "medium"
         const val FONT_LARGE = "large"
+
+        const val TAB_UNDERLAY_LOW = "low"
+        const val TAB_UNDERLAY_DEFAULT = "default"
+        const val TAB_UNDERLAY_HIGH = "high"
+
+        const val UI_MODE_AUTO = "auto"
+        const val UI_MODE_TOUCH = "touch"
+        const val UI_MODE_TV = "tv"
+
+        private const val SET_ITEM_SEPARATOR = "\u0001"
 
         const val downloadFolderName = "download_folder"
         const val bookFolderPrefix = "bookFolder:"

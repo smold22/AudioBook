@@ -1,6 +1,15 @@
 package com.yourapp.audiobook.ui
 
+import android.app.Activity
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,11 +24,13 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,15 +40,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
+import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.yourapp.audiobook.AudioBookApplication
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.source.api.Book
-import com.yourapp.audiobook.ui.components.BookSectionRow
 import com.yourapp.audiobook.ui.components.bookItems
 
 @Composable
@@ -46,32 +58,32 @@ fun HomeScreen(navController: NavHostController) {
     val viewModel: HomeViewModel = viewModel()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val sourceId by app.settingsStore.selectedSourceId.collectAsStateWithLifecycle(initialValue = null)
-    val viewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
-    val collections by viewModel.collections.collectAsStateWithLifecycle()
+    val rawViewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
+    // Сетка в 3 столбца доступна только в горизонтальном режиме и на Android TV.
+    val viewMode = if (rawViewMode == SettingsStore.VIEW_GRID3 && !isLandscapeOrTv) SettingsStore.VIEW_GRID else rawViewMode
     val listState = rememberLazyListState()
 
     val shouldLoadMore by remember {
         derivedStateOf {
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            val displayCount = if (viewMode == SettingsStore.VIEW_GRID) {
-                (state.books.size + 1) / 2
-            } else {
-                state.books.size
+            val displayCount = when (viewMode) {
+                SettingsStore.VIEW_GRID3 -> (state.books.size + 2) / 3
+                SettingsStore.VIEW_GRID -> (state.books.size + 1) / 2
+                else -> state.books.size
             }
-            lastVisible >= (displayCount - 3)
+            displayCount >= 5 && lastVisible >= (displayCount - 3)
         }
     }
 
     LaunchedEffect(Unit) {
         if (state.books.isEmpty() && !state.loading) {
             viewModel.refresh()
-            viewModel.refreshCollections()
         }
     }
     LaunchedEffect(sourceId) {
         viewModel.refreshForSource(sourceId)
     }
-    LaunchedEffect(shouldLoadMore) {
+    LaunchedEffect(shouldLoadMore, state.books.size, state.loading) {
         if (shouldLoadMore) viewModel.loadMore()
     }
 
@@ -89,6 +101,7 @@ fun HomeScreen(navController: NavHostController) {
                 style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.padding(start = 12.dp).weight(1f),
             )
+            GoogleSyncButton()
             IconButton(onClick = { navController.navigate("source") }) {
                 Icon(Icons.Filled.Info, contentDescription = "Источники")
             }
@@ -117,11 +130,6 @@ fun HomeScreen(navController: NavHostController) {
             modifier = Modifier.fillMaxSize(),
         ) {
         if (feed == HomeFeed.HOME) {
-            if (collections.new.isNotEmpty()) {
-                item(key = "section-new") {
-                    BookSectionRow(title = "Новинки", books = collections.new, onBookClick = openBook)
-                }
-            }
             item(key = "all-books-title") {
                 Text(
                     text = "Все книги",
@@ -159,5 +167,62 @@ fun HomeScreen(navController: NavHostController) {
             }
         }
         }
+    }
+}
+
+/**
+ * Кнопка синхронизации с Google в шапке главного экрана.
+ * Не вошедший пользователь — открывает вход через Google, вошедший — запускает
+ * синхронизацию. Во время синхронизации значок вращается.
+ */
+@Composable
+private fun GoogleSyncButton() {
+    val context = LocalContext.current
+    val app = context.applicationContext as AudioBookApplication
+    val syncState by app.syncManager.state.collectAsStateWithLifecycle()
+    val signInClient = remember {
+        runCatching { app.syncManager.buildSignInClient() }.getOrNull()
+    }
+    val signInLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val data = result.data ?: return@rememberLauncherForActivityResult
+            runCatching {
+                GoogleSignIn.getSignedInAccountFromIntent(data).getResult()
+            }.onSuccess { account ->
+                app.syncManager.onSignInOK(account)
+            }.onFailure {
+                app.syncManager.onSignInError(it)
+            }
+        }
+    }
+    val spin = if (syncState.syncing) {
+        val transition = rememberInfiniteTransition(label = "syncSpin")
+        transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing), RepeatMode.Restart),
+            label = "syncRotation",
+        )
+    } else {
+        null
+    }
+    IconButton(
+        onClick = {
+            if (syncState.signedIn) {
+                app.syncManager.syncNow()
+            } else {
+                signInClient?.signInIntent?.let { signInLauncher.launch(it) }
+            }
+        },
+        enabled = signInClient != null && !syncState.syncing,
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.Sync,
+            contentDescription = "Синхронизация с Google",
+            tint = if (syncState.syncing) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+            modifier = spin?.let { Modifier.rotate(it.value) } ?: Modifier,
+        )
     }
 }

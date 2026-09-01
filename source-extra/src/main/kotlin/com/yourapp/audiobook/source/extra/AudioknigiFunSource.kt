@@ -72,7 +72,7 @@ class AudioknigiFunSource(
     }
 
     override suspend fun books(url: String, page: Int): List<Book> {
-        val target = if (page <= 1) url else url.replace(Regex("""/page/\d+"""), "/page/$page")
+        val target = if (page <= 1) url else url.replace(Regex("""/page/\d+""")) { "/page/$page" }
         return parseBooks(getHtml(client, target))
     }
 

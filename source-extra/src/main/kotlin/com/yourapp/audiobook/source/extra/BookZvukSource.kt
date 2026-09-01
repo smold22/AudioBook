@@ -53,7 +53,7 @@ class BookZvukSource(
 
     override suspend fun books(url: String, page: Int): List<Book> {
         val target = if (page <= 1) url else {
-            if (url.contains("?")) url.replace(Regex("""[?&]page=\d+"""), "&page=$page") else "$url/?page=$page"
+            if (url.contains("?")) url.replace(Regex("""page=\d+""")) { "page=$page" } else "$url/?page=$page"
         }
         return parseBooks(getHtml(client, target))
     }

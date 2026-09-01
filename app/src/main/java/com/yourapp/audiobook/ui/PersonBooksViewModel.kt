@@ -13,7 +13,6 @@ class PersonBooksViewModel(
 ) : BookListViewModel(app) {
 
     private val queryNorm = normalize(query)
-    private val queryKey = queryNorm.split(' ').maxByOrNull { it.length } ?: queryNorm
 
     override suspend fun loadPage(page: Int): List<Book> {
         val books = appContext.searchAll(query, page)
@@ -27,10 +26,15 @@ class PersonBooksViewModel(
 
     private fun personMatches(person: String): Boolean {
         val p = normalize(person)
-        if (queryKey.isBlank()) return p.contains(queryNorm) || queryNorm.contains(p)
-        return p.split(' ').any { token ->
-            token == queryKey ||
-                (token.startsWith(queryKey) && token.length <= queryKey.length + 3)
+        if (p.isBlank()) return false
+        if (p.contains(queryNorm)) return true
+        val qTokens = queryNorm.split(' ').filter { it.length >= 3 }
+        if (qTokens.isEmpty()) return false
+        val pTokens = p.split(' ').filter { it.isNotEmpty() }
+        return qTokens.any { q ->
+            pTokens.any { t ->
+                t.length >= 3 && (t == q || t.startsWith(q) || q.startsWith(t))
+            }
         }
     }
 

@@ -4,8 +4,9 @@ import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.yourapp.audiobook.source.api.Book
 import java.io.File
-import java.io.FileWriter
+import java.io.FileOutputStream
 import java.io.IOException
+import java.io.OutputStreamWriter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -44,7 +45,7 @@ class BackupManager {
             val format = SimpleDateFormat("'AudioBook_backup_'yyyy_MM_dd_HH_mm_ss", Locale.UK)
             val file = File(dirPath, format.format(Date()) + ".json")
             try {
-                FileWriter(file).use { it.write(payload) }
+                OutputStreamWriter(FileOutputStream(file), Charsets.UTF_8).use { it.write(payload) }
                 file.absolutePath
             } catch (e: IOException) {
                 null
@@ -55,9 +56,13 @@ class BackupManager {
     suspend fun restore(filePath: String): BackupData {
         return withContext(Dispatchers.IO) {
             val text = File(filePath).readText(Charsets.UTF_8)
-            runCatching { gson.fromJson(text, BackupData::class.java) }
+            val data = runCatching { gson.fromJson(text, BackupData::class.java) }
                 .getOrElse { throw IOException("Выбранный файл не является резервной копией") }
                 ?: throw IOException("Выбранный файл не является резервной копией")
+            if (data.version !in 1..1) {
+                throw IOException("Несовместимая версия резервной копии")
+            }
+            data
         }
     }
 }

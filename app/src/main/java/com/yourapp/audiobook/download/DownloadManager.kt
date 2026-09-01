@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 enum class DownloadStatus { DOWNLOADING, COMPLETE, ERROR }
 
@@ -49,7 +50,7 @@ class DownloadManager(
     private val _downloadedKeys = MutableStateFlow<Set<String>>(emptySet())
     val downloadedKeys: StateFlow<Set<String>> = _downloadedKeys.asStateFlow()
 
-    private val cancelling = mutableSetOf<String>()
+    private val cancelling = ConcurrentHashMap.newKeySet<String>()
 
     init {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -74,9 +75,13 @@ class DownloadManager(
             if (isDownloaded(bookKey)) continue
             val sourceId = bookKey.substringBefore(":")
             val bookId = bookKey.substringAfter(":")
-            val source = app.sourceRegistry.get(sourceId) ?: continue
+            val source = app.sourceRegistry.get(sourceId)
+            if (source == null || bookId.isBlank() || bookId == bookKey) {
+                settingsStore.removeLegacyDownloadedKey(bookKey)
+                continue
+            }
             val details = runCatching { source.getBookDetails(source.urlForId(bookId)) }.getOrNull()
-                ?: continue
+            if (details == null || details.tracks.isEmpty()) continue
             val dirName = DownloadService.sanitize(details.book.title)
             val folderRef = findBookFolder(dirName)
             if (folderRef != null) {
@@ -104,15 +109,22 @@ class DownloadManager(
 
     fun startDownload(context: Context, bookKey: String) {
         if (_states.value.values.any { it.status == DownloadStatus.DOWNLOADING }) return
+        if (isDownloaded(bookKey)) return
         cancelling.remove(bookKey)
         _states.update {
             it + (bookKey to DownloadState(bookKey, DownloadStatus.DOWNLOADING))
         }
-        context.startForegroundService(
-            Intent(context, DownloadService::class.java)
-                .setAction(DownloadService.ACTION_DOWNLOAD)
-                .putExtra(DownloadService.EXTRA_BOOK_KEY, bookKey),
-        )
+        try {
+            context.startForegroundService(
+                Intent(context, DownloadService::class.java)
+                    .setAction(DownloadService.ACTION_DOWNLOAD)
+                    .putExtra(DownloadService.EXTRA_BOOK_KEY, bookKey),
+            )
+        } catch (e: Exception) {
+            _states.update {
+                it + (bookKey to DownloadState(bookKey, DownloadStatus.ERROR, errorMessage = "Не удалось запустить скачивание"))
+            }
+        }
     }
 
     fun cancel(bookKey: String) {
@@ -177,23 +189,27 @@ class DownloadManager(
         val folderRef = _downloadedBooks.value[bookKey] ?: return null
         val details = offlineDetails(bookKey) ?: return null
         val dirName = DownloadService.sanitize(details.book.title)
-        val uris: List<Uri>? = if (folderRef == APP_FOLDER) {
+        val files: List<Pair<String, Uri>>? = if (folderRef == APP_FOLDER) {
             val dir = File(appContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), dirName)
             if (!dir.isDirectory) return null
             dir.listFiles { file -> file.isFile && file.name.endsWith(".mp3") }
-                ?.sortedBy { it.name }
-                ?.map { Uri.fromFile(it) }
+                ?.map { it.name to Uri.fromFile(it) }
         } else {
             val root = DocumentFile.fromTreeUri(appContext, Uri.parse(folderRef))
             if (root == null || !root.isDirectory) return null
             root.findFile(dirName)
                 ?.listFiles()
                 ?.filter { it.isFile && it.name?.endsWith(".mp3") == true }
-                ?.sortedBy { it.name }
-                ?.map { it.uri }
+                ?.map { it.name.orEmpty() to it.uri }
         }
-        return uris?.takeIf { it.isNotEmpty() && trackCount > 0 && it.size == trackCount }
+        if (files == null || files.isEmpty()) return null
+        val sorted = files.sortedBy { fileIndex(it.first) }.map { it.second }
+        return sorted.takeIf { trackCount > 0 && it.size == trackCount }
     }
+
+    /** Индекс трека из имени файла вида "01 - Глава.mp3". */
+    private fun fileIndex(name: String): Int =
+        name.substringBefore(" -").trim().toIntOrNull() ?: Int.MAX_VALUE
 
     companion object {
         const val CHANNEL_ID = "downloads"

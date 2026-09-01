@@ -20,10 +20,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import com.yourapp.audiobook.AudioBookApplication
 import com.yourapp.audiobook.source.api.Book
+import com.yourapp.audiobook.ui.rememberAppImageLoader
+import com.yourapp.audiobook.ui.tvFocus
 
 private val CoverPlaceholder = ColorPainter(Color(0xFFE8E6E3))
 private val CoverError = ColorPainter(Color(0xFFD2CFCC))
@@ -34,6 +39,14 @@ private val CoverError = ColorPainter(Color(0xFFD2CFCC))
  */
 @Composable
 fun BookSectionRow(title: String, books: List<Book>, onBookClick: (Book) -> Unit) {
+    val app = LocalContext.current.applicationContext as? AudioBookApplication
+    val deadKeys = if (app != null) {
+        app.deadBooksStore.deadKeys.collectAsStateWithLifecycle(initialValue = emptySet()).value
+    } else {
+        emptySet()
+    }
+    val visibleBooks = books.filterNot { "${it.sourceId}:${it.id}" in deadKeys }
+    if (visibleBooks.isEmpty()) return
     Column {
         Text(
             text = title,
@@ -44,7 +57,10 @@ fun BookSectionRow(title: String, books: List<Book>, onBookClick: (Book) -> Unit
             contentPadding = PaddingValues(horizontal = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            items(books, key = { "${it.sourceId}:${it.id}" }) { book ->
+            items(
+                visibleBooks.distinctBy { "${it.sourceId}:${it.id}" },
+                key = { "${it.sourceId}:${it.id}" },
+            ) { book ->
                 MiniBookCard(book = book, onClick = { onBookClick(book) })
             }
         }
@@ -53,10 +69,12 @@ fun BookSectionRow(title: String, books: List<Book>, onBookClick: (Book) -> Unit
 
 @Composable
 private fun MiniBookCard(book: Book, onClick: () -> Unit) {
+    val imageLoader = rememberAppImageLoader()
     Column(
         modifier = Modifier
             .width(110.dp)
             .clickable(onClick = onClick)
+            .tvFocus()
             .padding(bottom = 8.dp),
     ) {
         AsyncImage(
@@ -64,6 +82,7 @@ private fun MiniBookCard(book: Book, onClick: () -> Unit) {
             contentDescription = book.title,
             placeholder = CoverPlaceholder,
             error = CoverError,
+            imageLoader = imageLoader,
             modifier = Modifier
                 .size(width = 110.dp, height = 150.dp)
                 .clip(RoundedCornerShape(8.dp)),
@@ -80,6 +99,15 @@ private fun MiniBookCard(book: Book, onClick: () -> Unit) {
                 text = it,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        sourceName(book)?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.tertiary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

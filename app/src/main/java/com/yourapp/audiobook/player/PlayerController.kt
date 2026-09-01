@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.core.content.ContextCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -35,6 +36,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 
+/**
+ * Вытаскивает метку referer (query-параметр ref) из URL и возвращает
+ * чистый URL + готовый заголовок Referer (https://<host>/).
+ */
+fun Uri.stripRefParam(): Pair<Uri, String?> {
+    val ref = getQueryParameter("ref") ?: return this to null
+    val clean = buildUpon().clearQuery().build()
+    return clean to "https://$ref/"
+}
+
 data class NowPlaying(
     val book: Book,
     val tracks: List<AudioTrack>,
@@ -61,7 +72,7 @@ class PlayerController(
     private val sessionActivity: PendingIntent = PendingIntent.getActivity(
         appContext,
         0,
-        Intent(appContext, com.yourapp.audiobook.MainActivity::class.java)
+        Intent(appContext, com.yourapp.audiobook.LauncherActivity::class.java)
             .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
@@ -74,7 +85,8 @@ class PlayerController(
                     "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36",
                 )
                 .apply {
-                    if (chain.request().header("Referer") == null) {
+                    val host = chain.request().url.host
+                    if (host.contains("izib") && chain.request().header("Referer") == null) {
                         header("Referer", "https://pda.izib.uk/")
                     }
                 }
@@ -85,15 +97,28 @@ class PlayerController(
 
     private val okHttpDataSourceFactory = OkHttpDataSource.Factory(httpClient)
 
-    private val dataSourceFactory: DataSource.Factory = object : DataSource.Factory {
-        override fun createDataSource(): DataSource =
-            RefererAwareDataSource(okHttpDataSourceFactory.createDataSource())
-    }
+    /**
+     * Фабрика данных: локальные файлы (file/content/asset/raw) обрабатывает
+     * [DefaultDataSource], а http/https — OkHttp с учётом Referer.
+     */
+    private val dataSourceFactory: DataSource.Factory =
+        DefaultDataSource.Factory(
+            appContext,
+            object : DataSource.Factory {
+                override fun createDataSource(): DataSource =
+                    RefererAwareDataSource(okHttpDataSourceFactory.createDataSource())
+            },
+        )
 
     private class RefererAwareDataSource(private val base: DataSource) : DataSource by base {
         override fun open(dataSpec: DataSpec): Long {
             val host = dataSpec.uri.host
+            val (cleanUri, ref) = dataSpec.uri.stripRefParam()
             val newSpec = when {
+                ref != null ->
+                    dataSpec.withUri(cleanUri).withRequestHeaders(
+                        dataSpec.httpRequestHeaders + ("Referer" to ref),
+                    )
                 host == null -> dataSpec
                 host.contains("redirectto.cc") ->
                     dataSpec.withRequestHeaders(
@@ -128,9 +153,13 @@ class PlayerController(
         .setWakeMode(C.WAKE_MODE_LOCAL)
         .build()
 
-    val mediaSession: MediaSession = MediaSession.Builder(appContext, player)
-        .setSessionActivity(sessionActivity)
-        .build()
+    var mediaSession: MediaSession = buildSession()
+        private set
+
+    private fun buildSession(): MediaSession =
+        MediaSession.Builder(appContext, player)
+            .setSessionActivity(sessionActivity)
+            .build()
 
     init {
         player.addListener(object : Player.Listener {
@@ -143,6 +172,15 @@ class PlayerController(
                         _sleepTimer.value = null
                         pause()
                     }
+                }
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                val timer = _sleepTimer.value ?: return
+                if (timer.mode == SleepTimerMode.END_OF_CHAPTER &&
+                    playbackState == Player.STATE_ENDED
+                ) {
+                    _sleepTimer.value = null
                 }
             }
         })
@@ -165,6 +203,21 @@ class PlayerController(
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 equalizer.attachIfNeeded(player.audioSessionId)
+            }
+        })
+        player.addListener(object : Player.Listener {
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (!playWhenReady) {
+                    saveProgressNow()
+                } else if (_nowPlaying.value != null && player.mediaItemCount > 0) {
+                    try {
+                        ContextCompat.startForegroundService(
+                            appContext,
+                            Intent(appContext, PlaybackService::class.java),
+                        )
+                    } catch (_: Exception) {
+                    }
+                }
             }
         })
         scope.launch {
@@ -195,10 +248,10 @@ class PlayerController(
         val nowPlaying = _nowPlaying.value ?: return
         val track = player.currentMediaItemIndex
         val position = player.currentPosition.coerceAtLeast(0L)
-        if (player.mediaItemCount == 0 && position <= 0) return
+        if (position <= 0) return
         lastSavedTrack = track
         lastSavedPosition = position
-        scope.launch { progressStore.save(nowPlaying.book.id, track, position) }
+        scope.launch { progressStore.save(bookKey(nowPlaying.book), track, position) }
     }
 
     private fun saveProgress() {
@@ -209,8 +262,10 @@ class PlayerController(
         if (track == lastSavedTrack && position == lastSavedPosition) return
         lastSavedTrack = track
         lastSavedPosition = position
-        scope.launch { progressStore.save(nowPlaying.book.id, track, position) }
+        scope.launch { progressStore.save(bookKey(nowPlaying.book), track, position) }
     }
+
+    private fun bookKey(book: Book): String = "${book.sourceId}:${book.id}"
 
     fun setSleepTimer(minutes: Int?) {
         _sleepTimer.value = minutes?.let {
@@ -227,6 +282,8 @@ class PlayerController(
     }
 
     fun play(details: BookDetails, startIndex: Int, startPositionMs: Long, localUris: List<Uri>? = null) {
+        if (details.tracks.isEmpty()) return
+        _sleepTimer.value = null
         val items = details.tracks.mapIndexed { index, track ->
             val uri = localUris?.getOrNull(index) ?: Uri.parse(track.url)
             MediaItem.Builder()
@@ -253,7 +310,7 @@ class PlayerController(
         _nowPlaying.value = NowPlaying(details.book, details.tracks)
         scope.launch {
             historyStore.record(details.book)
-            _bookmarks.value = bookmarksStore.load(details.book.id)
+            _bookmarks.value = bookmarksStore.load(bookKey(details.book))
         }
     }
 
@@ -268,14 +325,14 @@ class PlayerController(
         )
         val updated = (_bookmarks.value + bookmark).sortedByDescending { it.createdAtMs }
         _bookmarks.value = updated
-        scope.launch { bookmarksStore.save(playing.book.id, updated) }
+        scope.launch { bookmarksStore.save(bookKey(playing.book), updated) }
     }
 
     fun removeBookmark(id: String) {
         val playing = _nowPlaying.value ?: return
         val updated = _bookmarks.value.filterNot { it.id == id }
         _bookmarks.value = updated
-        scope.launch { bookmarksStore.save(playing.book.id, updated) }
+        scope.launch { bookmarksStore.save(bookKey(playing.book), updated) }
     }
 
     fun seekToBookmark(bookmark: Bookmark) {
@@ -323,11 +380,15 @@ class PlayerController(
 
     fun previous() {
         if (player.mediaItemCount == 0) return
-        player.seekToPreviousMediaItem()
+        if (player.currentPosition > 3_000L) {
+            player.seekTo(player.currentMediaItemIndex, 0L)
+        } else {
+            player.seekToPreviousMediaItem()
+        }
         player.playWhenReady = true
     }
 
-    private val speeds = floatArrayOf(1f, 1.25f, 1.5f, 1.75f, 2f, 0.75f)
+    private val speeds = floatArrayOf(1f, 1.25f, 1.5f, 1.75f, 2f, 2.5f, 3f, 0.75f)
 
     fun cycleSpeed(): Float {
         if (player.mediaItemCount == 0) return 1f
@@ -337,12 +398,20 @@ class PlayerController(
         return next
     }
 
+    fun setSpeed(speed: Float) {
+        if (player.mediaItemCount == 0) return
+        player.playbackParameters = PlaybackParameters(speed)
+    }
+
     fun stopAndClear() {
         saveProgressNow()
+        _sleepTimer.value = null
         player.stop()
         player.clearMediaItems()
         _nowPlaying.value = null
         _bookmarks.value = emptyList()
+        mediaSession.release()
+        mediaSession = buildSession()
     }
 
     private companion object {

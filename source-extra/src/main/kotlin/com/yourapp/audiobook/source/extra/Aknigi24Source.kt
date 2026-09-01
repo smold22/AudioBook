@@ -66,7 +66,7 @@ class Aknigi24Source(
 
     override suspend fun books(url: String, page: Int): List<Book> {
         val target = if (page <= 1) url else {
-            if (url.contains("?")) url.replace(Regex("""[?&]page=\d+"""), "&page=$page") else "$url?page=$page"
+            if (url.contains("?")) url.replace(Regex("""page=\d+""")) { "page=$page" } else "$url?page=$page"
         }
         return parseBooks(getHtml(client, target))
     }
@@ -75,7 +75,7 @@ class Aknigi24Source(
 
     override suspend fun seriesBooks(seriesUrl: String, page: Int): List<Book> {
         val target = if (page <= 1) seriesUrl else {
-            if (seriesUrl.contains("?")) seriesUrl.replace(Regex("""[?&]page=\d+"""), "&page=$page")
+            if (seriesUrl.contains("?")) seriesUrl.replace(Regex("""page=\d+""")) { "page=$page" }
             else "$seriesUrl?page=$page"
         }
         return parseBooks(getHtml(client, target))
@@ -131,11 +131,12 @@ class Aknigi24Source(
             chapters.mapNotNull { el ->
                 if (!el.isJsonObject) return@mapNotNull null
                 val o = el.asJsonObject
-                val n = o.get("n")?.asInt ?: return@mapNotNull null
+                val n = o.get("n")?.takeIf { it.isJsonPrimitive }?.asInt ?: return@mapNotNull null
                 AudioTrack(
                     title = "$bookName. Глава $n",
                     url = "$chapterBase$n",
-                    durationSeconds = o.get("d")?.takeIf { it.isJsonPrimitive }?.asInt,
+                    durationSeconds = runCatching { o.get("d")?.asString?.toDoubleOrNull()?.toInt() }
+                        .getOrNull(),
                 )
             }
         } catch (_: Exception) {

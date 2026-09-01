@@ -25,20 +25,14 @@ import com.yourapp.audiobook.AudioBookApplication
 import com.yourapp.audiobook.download.DownloadStatus
 
 @Composable
-fun DownloadButton(app: AudioBookApplication, bookKey: String) {
+fun rememberDownloadStarter(app: AudioBookApplication, bookKey: String): () -> Unit {
     val context = LocalContext.current
-    val states by app.downloadManager.states.collectAsStateWithLifecycle()
-    val downloadedKeys by app.downloadManager.downloadedKeys.collectAsStateWithLifecycle()
-    val state = states[bookKey]
-    val downloaded = bookKey in downloadedKeys
-
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         if (granted) app.downloadManager.startDownload(context, bookKey)
     }
-
-    val startDownload: () -> Unit = {
+    return {
         val needsNotificationPermission = Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
@@ -48,6 +42,16 @@ fun DownloadButton(app: AudioBookApplication, bookKey: String) {
             app.downloadManager.startDownload(context, bookKey)
         }
     }
+}
+
+@Composable
+fun DownloadButton(app: AudioBookApplication, bookKey: String) {
+    val states by app.downloadManager.states.collectAsStateWithLifecycle()
+    val downloadedKeys by app.downloadManager.downloadedKeys.collectAsStateWithLifecycle()
+    val state = states[bookKey]
+    val downloaded = bookKey in downloadedKeys
+
+    val startDownload = rememberDownloadStarter(app, bookKey)
 
     when {
         downloaded -> IconButton(onClick = {}, enabled = false) {

@@ -46,13 +46,14 @@ class EqualizerController(
         try {
             equalizer?.release()
             equalizer = null
-            attachedSession = audioSessionId
             val eq = Equalizer(0, audioSessionId)
             equalizer = eq
+            attachedSession = audioSessionId
             applyPending(eq)
             refreshState(eq)
         } catch (e: Exception) {
             equalizer = null
+            attachedSession = -1
             _state.value = EqualizerState(available = false)
         }
     }

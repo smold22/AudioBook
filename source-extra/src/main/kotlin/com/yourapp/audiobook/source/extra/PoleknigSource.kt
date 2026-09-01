@@ -64,7 +64,7 @@ class PoleknigSource(
 
     override suspend fun books(url: String, page: Int): List<Book> {
         val target = if (page <= 1) url else {
-            val updated = url.replace(Regex("""[?&]p=\d+"""), "&p=$page")
+            val updated = url.replace(Regex("""p=\d+""")) { "p=$page" }
             if (updated == url) "$url?p=$page" else updated
         }
         return parseBooks(getHtml(client, target))
@@ -74,7 +74,7 @@ class PoleknigSource(
 
     override suspend fun seriesBooks(seriesUrl: String, page: Int): List<Book> {
         val target = if (page <= 1) seriesUrl else {
-            val updated = seriesUrl.replace(Regex("""[?&]p=\d+"""), "&p=$page")
+            val updated = seriesUrl.replace(Regex("""p=\d+""")) { "p=$page" }
             if (updated == seriesUrl) "$seriesUrl?p=$page" else updated
         }
         return parseBooks(getHtml(client, target))

@@ -1,48 +1,69 @@
 package com.yourapp.audiobook.data
 
+import com.yourapp.audiobook.source.api.Book
+import java.io.File
+import java.io.IOException
+import kotlinx.coroutines.runBlocking
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
-import java.io.IOException
 
 class BackupManagerTest {
 
+    private lateinit var tempDir: File
+
+    @Before
+    fun setUp() {
+        tempDir = createTempDir("backup-test")
+    }
+
+    @After
+    fun tearDown() {
+        tempDir.deleteRecursively()
+    }
+
     @Test
-    fun roundTripPreservesProgressAndTheme() {
-        val payload = BackupManager.buildPayload(
+    fun roundTripPreservesProgressAndTheme() = runBlocking {
+        val manager = BackupManager()
+        val path = manager.backup(
+            dirPath = tempDir.absolutePath,
+            favorites = listOf(
+                Book(sourceId = "test", id = "1", title = "Книга", url = "https://test/1"),
+            ),
+            history = emptyList(),
             progress = mapOf("book:123" to "2;60000", "book:456" to "0;1000"),
-            themeMode = "dark",
-        )
-        val restored = BackupManager.parsePayload(payload)
-        assertEquals(2, restored.progress.size)
+            theme = "dark",
+        )!!
+        val restored = manager.restore(path)
+        assertEquals(2, restored.progress!!.size)
         assertEquals("2;60000", restored.progress["book:123"])
         assertEquals("dark", restored.theme)
+        assertEquals(1, restored.favorites!!.size)
     }
 
     @Test
-    fun emptyProgressAndNullTheme() {
-        val payload = BackupManager.buildPayload(emptyMap(), "")
-        val restored = BackupManager.parsePayload(payload)
-        assertTrue(restored.progress.isEmpty())
-        assertNull(restored.theme)
-    }
-
-    @Test
-    fun payloadIsStableJson() {
-        val payload = BackupManager.buildPayload(mapOf("book:1" to "0;0"), "light")
-        assertTrue(payload.contains("\"version\":1"))
-        assertTrue(payload.contains("\"theme\":\"light\""))
-        assertTrue(payload.contains("\"progress\":{\"book:1\":\"0;0\"}"))
+    fun emptyProgressAndNullTheme() = runBlocking {
+        val manager = BackupManager()
+        val path = manager.backup(tempDir.absolutePath, emptyList(), emptyList(), emptyMap(), "")!!
+        val restored = manager.restore(path)
+        assertTrue(restored.progress!!.isEmpty())
+        assertTrue(restored.theme.isNullOrEmpty())
     }
 
     @Test(expected = IOException::class)
-    fun corruptInputThrows() {
-        BackupManager.parsePayload("not json at all")
+    fun corruptInputThrows() = runBlocking<Unit> {
+        val file = File(tempDir, "bad.json")
+        file.writeText("not json at all")
+        BackupManager().restore(file.absolutePath)
     }
 
     @Test(expected = IOException::class)
-    fun malformedJsonThrows() {
-        BackupManager.parsePayload("{\"version\":1")
+    fun unsupportedVersionThrows() = runBlocking<Unit> {
+        val file = File(tempDir, "future.json")
+        file.writeText("{\"version\":99}")
+        BackupManager().restore(file.absolutePath)
     }
 }

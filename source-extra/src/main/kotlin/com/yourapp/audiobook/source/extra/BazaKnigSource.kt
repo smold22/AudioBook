@@ -93,7 +93,13 @@ class BazaKnigSource(
     }
 
     override suspend fun books(url: String, page: Int): List<Book> {
-        val target = if (page <= 1) url else url.replace(Regex("""/page/\d+"""), "/page/$page")
+        val target = if (page <= 1) url else {
+            if (Regex("""/page/\d+""").containsMatchIn(url)) {
+                url.replace(Regex("""/page/\d+""")) { "/page/$page" }
+            } else {
+                url + "?cstart=${(page - 1) * 20}"
+            }
+        }
         return parseBooks(getHtml(client, target))
     }
 
@@ -192,7 +198,7 @@ class BazaKnigSource(
                             val file = sources?.get(0)?.asJsonObject?.get("file")?.asString ?: return@mapNotNull null
                             AudioTrack(
                                 title = obj.get("title")?.asString ?: "",
-                                url = "https://archive.org$file",
+                                url = if (file.startsWith("http")) file else "https://archive.org$file",
                                 durationSeconds = obj.get("duration")?.takeIf { it.isJsonPrimitive }?.asInt,
                             )
                         }

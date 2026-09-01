@@ -48,9 +48,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import coil3.compose.AsyncImage
 import com.yourapp.audiobook.AudioBookApplication
+import com.yourapp.audiobook.download.DownloadStatus
 import com.yourapp.audiobook.source.api.AudioTrack
 import com.yourapp.audiobook.ui.components.BookSectionRow
 import com.yourapp.audiobook.ui.components.DownloadButton
+import com.yourapp.audiobook.ui.components.rememberDownloadStarter
 import kotlinx.coroutines.launch
 
 class BookViewModelFactory(
@@ -73,6 +75,9 @@ fun BookScreen(bookKey: String, navController: NavHostController) {
     val scope = rememberCoroutineScope()
     val favoriteKeys by app.favoritesStore.favoriteKeys.collectAsStateWithLifecycle(initialValue = emptySet())
     val isFavorite = bookKey in favoriteKeys
+    val downloadStates by app.downloadManager.states.collectAsStateWithLifecycle()
+    val downloadedKeys by app.downloadManager.downloadedKeys.collectAsStateWithLifecycle()
+    val startDownload = rememberDownloadStarter(app, bookKey)
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -153,6 +158,7 @@ fun BookScreen(bookKey: String, navController: NavHostController) {
                                         )
                                     }
                                 }
+                                .tvFocus()
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
                         )
                     }
@@ -164,33 +170,74 @@ fun BookScreen(bookKey: String, navController: NavHostController) {
                         }
                     }
                 }
-                state.progress?.let { progress ->
-                    item {
-                        Button(
-                            onClick = { viewModel.continuePlayback() },
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        ) {
-                            Text(
-                                "Продолжить с главы ${progress.trackIndex + 1} · ${formatMs(progress.positionMs)}",
-                            )
+                if (details.tracks.isNotEmpty()) {
+                    state.progress?.let { progress ->
+                        item {
+                            Button(
+                                onClick = { viewModel.continuePlayback() },
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            ) {
+                                Text(
+                                    "Продолжить с главы ${progress.trackIndex + 1} · ${formatMs(progress.positionMs)}",
+                                )
+                            }
                         }
                     }
                 }
                 item {
                     Text(
-                        "Главы (${details.tracks.size})",
+                        if (details.tracks.isEmpty() && details.torrentUrl != null) {
+                            "Скачать и слушать"
+                        } else {
+                            "Главы (${details.tracks.size})"
+                        },
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                     )
                 }
                 if (details.tracks.isEmpty()) {
                     item {
-                        Text(
-                            "Треки недоступны: книга удалена или доступен только ознакомительный фрагмент",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        )
+                        if (details.torrentUrl != null) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            ) {
+                                Text(
+                                    "Книга распространяется через торрент. После завершения загрузки книга станет доступна для прослушивания.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                val state = downloadStates[bookKey]
+                                val downloaded = bookKey in downloadedKeys
+                                Button(
+                                    onClick = startDownload,
+                                    enabled = !downloaded && state?.status != DownloadStatus.DOWNLOADING,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    when {
+                                        downloaded -> Text("Книга скачана")
+                                        state?.status == DownloadStatus.DOWNLOADING -> {
+                                            CircularProgressIndicator(
+                                                progress = { (state?.percent ?: 0) / 100f },
+                                                modifier = Modifier.size(20.dp),
+                                                strokeWidth = 2.dp,
+                                            )
+                                            Spacer(Modifier.width(12.dp))
+                                            Text("Скачивание ${state?.percent ?: 0}%")
+                                        }
+                                        state?.status == DownloadStatus.ERROR -> Text("Повторить скачивание")
+                                        else -> Text("Скачать и слушать")
+                                    }
+                                }
+                            }
+                        } else {
+                            Text(
+                                "Треки недоступны: книга удалена или доступен только ознакомительный фрагмент",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            )
+                        }
                     }
                 }
                 itemsIndexed(details.tracks, key = { index, track -> "${track.url}#$index" }) { index, track ->
@@ -215,11 +262,13 @@ private fun BookHeader(
     onReaderClick: (String) -> Unit,
 ) {
     val book = state.book
+    val imageLoader = rememberAppImageLoader()
     Column(Modifier.padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             AsyncImage(
                 model = book?.coverUrl,
                 contentDescription = book?.title,
+                imageLoader = imageLoader,
                 modifier = Modifier
                     .size(140.dp)
                     .clip(RoundedCornerShape(10.dp)),
@@ -250,7 +299,7 @@ private fun BookHeader(
                         color = MaterialTheme.colorScheme.primary,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.clickable { onAuthorClick(author) },
+                        modifier = Modifier.clickable { onAuthorClick(author) }.tvFocus(),
                     )
                 }
                 book?.reader?.let { reader ->
@@ -260,7 +309,7 @@ private fun BookHeader(
                         color = MaterialTheme.colorScheme.primary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.clickable { onReaderClick(reader) },
+                        modifier = Modifier.clickable { onReaderClick(reader) }.tvFocus(),
                     )
                 }
                 book?.durationText?.let {
@@ -291,6 +340,7 @@ private fun TrackRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
+            .tvFocus()
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

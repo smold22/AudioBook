@@ -87,7 +87,7 @@ class KnigobludSource(
 
     override suspend fun books(url: String, page: Int): List<Book> {
         val target = if (page <= 1) url else {
-            if (url.contains("?")) url.replace(Regex("""[?&]page=\d+"""), "&page=$page") else "$url/$page"
+            if (url.contains("?")) url.replace(Regex("""page=\d+""")) { "page=$page" } else "$url/$page"
         }
         return parseBooks(getHtml(client, target))
     }
@@ -161,8 +161,9 @@ class KnigobludSource(
             val start = raw.indexOf("KB.playerInit(")
             if (start < 0) continue
             val jsonStart = raw.indexOf('{', start)
+            if (jsonStart < 0) continue
             val jsonEnd = findJsonEnd(raw, jsonStart)
-            if (jsonStart < 0 || jsonEnd < 0) continue
+            if (jsonEnd < 0) continue
             return try {
                 val obj = JsonParser.parseString(raw.substring(jsonStart, jsonEnd + 1)).asJsonObject
                 val playlist = obj.getAsJsonArray("playlist")

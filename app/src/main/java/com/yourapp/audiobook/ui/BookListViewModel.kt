@@ -33,6 +33,7 @@ abstract class BookListViewModel(app: Application) : AndroidViewModel(app) {
     private var generation = 0L
     private var lastSourceId: String? = null
     private var hideFemaleAuthors = false
+    private var deadKeys: Set<String> = emptySet()
 
     init {
         viewModelScope.launch {
@@ -41,6 +42,12 @@ abstract class BookListViewModel(app: Application) : AndroidViewModel(app) {
                     hideFemaleAuthors = enabled
                     refresh()
                 }
+            }
+        }
+        viewModelScope.launch {
+            appContext.deadBooksStore.deadKeys.collect { keys ->
+                deadKeys = keys
+                _state.update { it.copy(books = it.books.filterNot { b -> "${b.sourceId}:${b.id}" in keys }) }
             }
         }
     }
@@ -70,6 +77,7 @@ abstract class BookListViewModel(app: Application) : AndroidViewModel(app) {
 
     fun loadMore() {
         if (loadingJob?.isActive == true) return
+        if (_state.value.endReached) return
         val gen = generation
         loadingJob = viewModelScope.launch {
             _state.update { it.copy(loading = true, error = null) }
@@ -83,29 +91,41 @@ abstract class BookListViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 var page = currentPage + 1
                 var attemptsLeft = 3
-                val loaded = mutableListOf<Book>()
                 var visible = emptyList<Book>()
-                val deadKeys = appContext.deadBooksStore.snapshot()
+                var reachedEnd = false
+                val deadKeysSnapshot = deadKeys
+                var pagesFetched = 0
                 while (true) {
                     val items = loadPage(page)
                     if (gen != generation) return@launch
                     items.forEach { appContext.bookCache.put(it) }
-                    val kept = filterIgnored(items).filterNot { "${it.sourceId}:${it.id}" in deadKeys }
-                    loaded += items
-                    if (kept.isNotEmpty() || items.isEmpty() || attemptsLeft-- <= 0) {
+                    pagesFetched++
+                    val kept = filterIgnored(items).filterNot { "${it.sourceId}:${it.id}" in deadKeysSnapshot }
+                    if (items.isEmpty()) {
                         currentPage = page
-                        visible = kept
+                        reachedEnd = true
+                        break
+                    }
+                    visible += kept
+                    currentPage = page
+                    if (visible.size >= TARGET_BOOKS || pagesFetched >= MAX_PAGES_PER_LOAD) break
+                    if (kept.isEmpty() && --attemptsLeft <= 0) {
+                        reachedEnd = true
                         break
                     }
                     page += 1
                 }
-                if (visible.isNotEmpty() || loaded.isEmpty()) {
+                if (visible.isNotEmpty() || reachedEnd) {
                     _state.update {
                         val merged = it.books + visible
-                        it.copy(books = merged.distinctBy { b -> "${b.sourceId}:${b.id}" }, loading = false)
+                        it.copy(
+                            books = merged.distinctBy { b -> "${b.sourceId}:${b.id}" },
+                            loading = false,
+                            endReached = reachedEnd,
+                        )
                     }
                 } else {
-                    _state.update { it.copy(loading = false, endReached = true) }
+                    _state.update { it.copy(loading = false) }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -137,5 +157,10 @@ abstract class BookListViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         return filtered
+    }
+
+    private companion object {
+        const val TARGET_BOOKS = 40
+        const val MAX_PAGES_PER_LOAD = 20
     }
 }

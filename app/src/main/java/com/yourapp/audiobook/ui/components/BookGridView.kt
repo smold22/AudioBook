@@ -30,9 +30,12 @@ import coil3.compose.LocalPlatformContext
 import coil3.request.ImageRequest
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.source.api.Book
+import com.yourapp.audiobook.ui.rememberAppImageLoader
+import com.yourapp.audiobook.ui.tvFocus
 
 /**
- * Выводит список книг в ленивом контейнере списком или сеткой в два столбца
+ * Выводит список книг в ленивом контейнере списком или сеткой
+ * (в два столбца, либо в три — в горизонтальном режиме и на Android TV)
  * в зависимости от настройки «Вид».
  */
 fun LazyListScope.bookItems(
@@ -42,13 +45,14 @@ fun LazyListScope.bookItems(
     key: (Book) -> Any = { "${it.sourceId}:${it.id}" },
     action: (@Composable (Book) -> Unit)? = null,
 ) {
-    if (viewMode == SettingsStore.VIEW_GRID) {
-        val rows = books.chunked(2)
+    if (viewMode == SettingsStore.VIEW_GRID || viewMode == SettingsStore.VIEW_GRID3) {
+        val columns = if (viewMode == SettingsStore.VIEW_GRID3) 3 else 2
+        val rows = books.chunked(columns)
         rows.forEachIndexed { rowIndex, row ->
             item(key = "grid-row-" + row.joinToString("|") { key(it).toString() }) {
                 BookGridRow(
                     books = row,
-                    prefetchBooks = books.drop((rowIndex + 1) * 2).take(PREFETCH_COUNT),
+                    prefetchBooks = books.drop((rowIndex + 1) * columns).take(PREFETCH_COUNT),
                     onBookClick = onBookClick,
                     action = action,
                 )
@@ -112,9 +116,11 @@ private fun BookGridItem(
     modifier: Modifier = Modifier,
     action: (@Composable () -> Unit)? = null,
 ) {
+    val imageLoader = rememberAppImageLoader()
     Column(
         modifier = modifier
             .clickable(onClick = onClick)
+            .tvFocus()
             .padding(bottom = 8.dp),
     ) {
         Box {
@@ -123,6 +129,7 @@ private fun BookGridItem(
                 contentDescription = book.title,
                 placeholder = CoverPlaceholder,
                 error = CoverError,
+                imageLoader = imageLoader,
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(11f / 15f)
@@ -150,6 +157,15 @@ private fun BookGridItem(
                 text = it,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        sourceName(book)?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.tertiary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

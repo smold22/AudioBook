@@ -18,14 +18,36 @@ const val USER_AGENT =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
 
 class MemoryCookieJar : CookieJar {
-    private val store = mutableMapOf<String, MutableList<Cookie>>()
+    private val store = java.util.concurrent.ConcurrentHashMap<String, MutableList<Cookie>>()
 
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
-        store.getOrPut(url.host) { mutableListOf() }.addAll(cookies)
+        val host = url.host
+        val now = System.currentTimeMillis()
+        store.compute(host) { _, existing ->
+            val list = (existing ?: mutableListOf()).filter { it.expiresAt >= now }.toMutableList()
+            list.addAll(cookies)
+            if (list.size > MAX_PER_HOST) {
+                list.subList(list.size - MAX_PER_HOST, list.size).toMutableList()
+            } else {
+                list
+            }
+        }
     }
 
-    override fun loadForRequest(url: HttpUrl): List<Cookie> =
-        store[url.host] ?: emptyList()
+    override fun loadForRequest(url: HttpUrl): List<Cookie> {
+        val host = url.host
+        val now = System.currentTimeMillis()
+        val current = store[host] ?: return emptyList()
+        val valid = current.filter { it.expiresAt >= now }
+        if (valid.size != current.size) {
+            store[host] = valid.toMutableList()
+        }
+        return valid
+    }
+
+    private companion object {
+        const val MAX_PER_HOST = 200
+    }
 }
 
 fun buildClient(): OkHttpClient = OkHttpClient.Builder()
@@ -51,6 +73,27 @@ suspend fun getHtml(client: OkHttpClient, url: String, referer: String? = null):
                 client.newCall(builder.build()).execute().use { response ->
                     if (!response.isSuccessful) throw IOException("HTTP ${response.code} для $url")
                     return@withContext response.body?.string() ?: throw IOException("Пустой ответ для $url")
+                }
+            } catch (e: Exception) {
+                if (attempt == MAX_ATTEMPTS - 1) throw e
+                lastError = e
+                delay(700L * (attempt + 1))
+            }
+        }
+        throw lastError ?: IOException("Ошибка запроса для $url")
+    }
+
+/** Скачивает бинарные данные (например, торрент-файл). */
+suspend fun getBytes(client: OkHttpClient, url: String, referer: String? = null): ByteArray =
+    withContext(Dispatchers.IO) {
+        var lastError: Exception? = null
+        repeat(MAX_ATTEMPTS) { attempt ->
+            try {
+                val builder = Request.Builder().url(url)
+                if (referer != null) builder.header("Referer", referer)
+                client.newCall(builder.build()).execute().use { response ->
+                    if (!response.isSuccessful) throw IOException("HTTP ${response.code} для $url")
+                    return@withContext response.body?.bytes() ?: throw IOException("Пустой ответ для $url")
                 }
             } catch (e: Exception) {
                 if (attempt == MAX_ATTEMPTS - 1) throw e
@@ -92,6 +135,44 @@ suspend fun postForm(
 
 fun String.unescapeJs(): String =
     replace("\\\"", "\"").replace("\\\\", "\\").replace("\\/", "/")
+
+/** URL плейлиста из кода плеера Playerjs: new Playerjs({id:"...", file:"URL", ...}) */
+fun playerjsPlaylistUrl(html: String): String? =
+    Regex(
+        """new\s+Playerjs\(\{[^}]*?file\s*:\s*["']([^"']+)["']""",
+        RegexOption.IGNORE_CASE,
+    ).find(html)?.groupValues?.get(1)
+
+/**
+ * Разбирает JSON-плейлист Playerjs в треки.
+ * Поддерживает массив [{"title":..,"file":..}] и объект {"playlist":[...]}.
+ */
+fun parsePlayerjsJson(json: String): List<com.yourapp.audiobook.source.api.AudioTrack> =
+    runCatching {
+        val root = com.google.gson.JsonParser.parseString(json)
+        val arr = when {
+            root.isJsonArray -> root.asJsonArray
+            root.isJsonObject -> root.asJsonObject.getAsJsonArray("playlist")
+            else -> null
+        } ?: return emptyList()
+        arr.mapNotNull { el ->
+            if (!el.isJsonObject) return@mapNotNull null
+            val o = el.asJsonObject
+            val file = o.get("file")?.takeIf { it.isJsonPrimitive }?.asString ?: return@mapNotNull null
+            val title = o.get("title")?.takeIf { it.isJsonPrimitive }?.asString
+                ?: file.substringAfterLast('/').substringBefore('?')
+            com.yourapp.audiobook.source.api.AudioTrack(title = title, url = file)
+        }
+    }.getOrDefault(emptyList())
+
+/**
+ * Добавляет в URL метку referer (для CDN, требующих заголовок Referer).
+ * Приложение вытаскивает метку и подставляет заголовок при запросе.
+ */
+fun String.withRefererRef(refererHost: String): String {
+    val sep = if (contains('?')) "&" else "?"
+    return "$this${sep}ref=$refererHost"
+}
 
 fun String?.toNullIfBlank(): String? = this?.takeIf { it.isNotBlank() }
 

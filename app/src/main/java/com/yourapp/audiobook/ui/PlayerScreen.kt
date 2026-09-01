@@ -8,13 +8,13 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,22 +25,27 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Bookmarks
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Replay30
 import androidx.compose.material.icons.filled.Forward30
 import androidx.compose.material.icons.filled.SkipNext
@@ -56,6 +61,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -65,7 +71,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -75,6 +85,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
+import android.net.Uri
 import android.widget.Toast
 import coil3.compose.AsyncImage
 import com.yourapp.audiobook.AudioBookApplication
@@ -82,6 +93,7 @@ import com.yourapp.audiobook.data.Bookmark
 import com.yourapp.audiobook.player.EqualizerState
 import com.yourapp.audiobook.player.SleepTimer
 import com.yourapp.audiobook.player.SleepTimerMode
+import com.yourapp.audiobook.source.api.AudioTrack
 import com.yourapp.audiobook.ui.components.DownloadButton
 import kotlinx.coroutines.launch
 
@@ -101,6 +113,15 @@ fun PlayerScreen(navController: NavHostController) {
     var showSleepDialog by remember { mutableStateOf(false) }
     var showBookmarksDialog by remember { mutableStateOf(false) }
     var showEqualizerDialog by remember { mutableStateOf(false) }
+    var showChaptersDialog by remember { mutableStateOf(false) }
+    var showSpeedDialog by remember { mutableStateOf(false) }
+    val trackListState = rememberLazyListState()
+
+    LaunchedEffect(snapshot.trackIndex) {
+        if (snapshot.trackIndex >= 0) {
+            trackListState.animateScrollToItem(snapshot.trackIndex)
+        }
+    }
 
     DisposableEffect(Unit) {
         onDispose { viewModel.saveProgressNow() }
@@ -114,54 +135,6 @@ fun PlayerScreen(navController: NavHostController) {
             IconButton(onClick = { navController.popBackStack() }) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
             }
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Spacer(Modifier.width(8.dp))
-                TextButton(onClick = { viewModel.cycleSpeed() }) {
-                    Text(formatSpeed(snapshot.speed))
-                }
-                sleepTimer?.let { timer ->
-                    Text(
-                        text = when (timer.mode) {
-                            SleepTimerMode.TIME ->
-                                formatSleepRemaining((timer.endAtMs ?: 0L) - System.currentTimeMillis())
-                            SleepTimerMode.END_OF_CHAPTER -> "До конца главы"
-                        },
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-                IconButton(onClick = { showSleepDialog = true }) {
-                    Icon(Icons.Filled.Bedtime, contentDescription = "Таймер сна")
-                }
-                IconButton(
-                    onClick = {
-                        viewModel.addBookmark()
-                        Toast.makeText(context, "Закладка добавлена", Toast.LENGTH_SHORT).show()
-                    },
-                ) {
-                    Icon(Icons.Filled.Bookmark, contentDescription = "Сохранить позицию")
-                }
-                IconButton(onClick = { showBookmarksDialog = true }) {
-                    Icon(Icons.Filled.Bookmarks, contentDescription = "Закладки")
-                }
-                IconButton(onClick = { showEqualizerDialog = true }) {
-                    Icon(Icons.Filled.Equalizer, contentDescription = "Эквалайзер")
-                }
-                nowPlaying?.let { playing ->
-                    val isFavorite = app.bookCache.keyOf(playing.book) in favoriteKeys
-                    IconButton(onClick = { scope.launch { app.favoritesStore.toggle(playing.book) } }) {
-                        Icon(
-                            imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                            contentDescription = "Избранное",
-                            tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    DownloadButton(app, app.bookCache.keyOf(playing.book))
-                }
-            }
         }
 
         val playing = nowPlaying
@@ -170,34 +143,110 @@ fun PlayerScreen(navController: NavHostController) {
                 Text("Ничего не играет", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp),
+                verticalArrangement = Arrangement.Center,
+            ) {
                 Box(
                     modifier = Modifier.fillMaxWidth(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    val pulseTransition = rememberInfiniteTransition(label = "coverPulse")
-                    val pulse by pulseTransition.animateFloat(
-                        initialValue = 0.97f,
-                        targetValue = 1.03f,
+                    val spinTransition = rememberInfiniteTransition(label = "coverSpin")
+                    val rotation by spinTransition.animateFloat(
+                        initialValue = 0f,
+                        targetValue = 360f,
                         animationSpec = infiniteRepeatable(
-                            animation = tween(1600, easing = FastOutSlowInEasing),
-                            repeatMode = RepeatMode.Reverse,
+                            animation = tween(durationMillis = 8000, easing = LinearEasing),
+                            repeatMode = RepeatMode.Restart,
                         ),
-                        label = "coverScale",
+                        label = "coverRotation",
                     )
-                    AsyncImage(
-                        model = playing.book.coverUrl,
-                        contentDescription = playing.book.title,
+                    Box(
                         modifier = Modifier
                             .size(240.dp)
                             .graphicsLayer {
-                                val scale = if (snapshot.isPlaying) pulse else 1f
-                                scaleX = scale
-                                scaleY = scale
+                                rotationZ = if (snapshot.isPlaying) rotation else 0f
+                            },
+                    ) {
+                        Canvas(Modifier.fillMaxSize()) {
+                            val radius = size.minDimension / 2f
+                            drawCircle(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(Color(0xFF3A3A3A), Color(0xFF111111), Color(0xFF050505)),
+                                    center = Offset(size.width * 0.42f, size.height * 0.38f),
+                                    radius = radius,
+                                ),
+                                radius = radius,
+                            )
+                            drawCircle(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(Color(0x66FFFFFF), Color.Transparent),
+                                    center = Offset(size.width * 0.35f, size.height * 0.3f),
+                                    radius = radius * 0.55f,
+                                ),
+                                radius = radius,
+                            )
+                            drawCircle(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(Color(0x4DFFFFFF), Color.Transparent),
+                                    center = Offset(size.width * 0.68f, size.height * 0.72f),
+                                    radius = radius * 0.45f,
+                                ),
+                                radius = radius,
+                            )
+                            drawCircle(
+                                brush = Brush.linearGradient(
+                                    colors = listOf(Color(0x14FFFFFF), Color.Transparent),
+                                    start = Offset.Zero,
+                                    end = Offset(size.width, size.height),
+                                ),
+                                radius = radius,
+                            )
+                            val grooveColor = Color(0x1A000000)
+                            for (i in 1..16) {
+                                drawCircle(
+                                    color = grooveColor,
+                                    radius = radius * (0.56f + i * 0.026f),
+                                    style = Stroke(width = 1.5.dp.toPx()),
+                                )
                             }
-                            .clip(RoundedCornerShape(12.dp)),
-                        contentScale = ContentScale.Crop,
-                    )
+                            val labelRadius = radius * 0.42f
+                            drawCircle(color = Color(0xFF1C1C1C), radius = labelRadius)
+                            drawCircle(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(Color(0xFF262626), Color(0xFF141414)),
+                                    center = center,
+                                    radius = labelRadius,
+                                ),
+                                radius = labelRadius,
+                            )
+                            drawCircle(
+                                color = Color(0xFF444444),
+                                radius = labelRadius,
+                                style = Stroke(width = 1.5.dp.toPx()),
+                            )
+                        }
+                        AsyncImage(
+                            model = playing.book.coverUrl,
+                            contentDescription = playing.book.title,
+                            imageLoader = app.imageLoader,
+                            modifier = Modifier
+                                .size(180.dp)
+                                .align(Alignment.Center)
+                                .clip(CircleShape),
+                            contentScale = ContentScale.Crop,
+                        )
+                        Box(
+                            Modifier
+                                .size(16.dp)
+                                .align(Alignment.Center)
+                                .background(Color.Black, CircleShape),
+                        )
+                    }
                 }
                 Spacer(Modifier.height(20.dp))
                 val currentTrack = playing.tracks.getOrNull(snapshot.trackIndex)
@@ -216,7 +265,79 @@ fun PlayerScreen(navController: NavHostController) {
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Spacer(Modifier.height(12.dp))
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = { showSpeedDialog = true }) {
+                        Text(formatSpeed(snapshot.speed))
+                    }
+                    sleepTimer?.let { timer ->
+                        Text(
+                            text = when (timer.mode) {
+                                SleepTimerMode.TIME ->
+                                    formatSleepRemaining((timer.endAtMs ?: 0L) - System.currentTimeMillis())
+                                SleepTimerMode.END_OF_CHAPTER -> "До конца главы"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    IconButton(onClick = { showSleepDialog = true }) {
+                        Icon(Icons.Filled.Bedtime, contentDescription = "Таймер сна")
+                    }
+                    IconButton(
+                        onClick = {
+                            viewModel.addBookmark()
+                            Toast.makeText(context, "Закладка добавлена", Toast.LENGTH_SHORT).show()
+                        },
+                    ) {
+                        Icon(Icons.Filled.Bookmark, contentDescription = "Сохранить позицию")
+                    }
+                    IconButton(onClick = { showBookmarksDialog = true }) {
+                        Icon(Icons.Filled.Bookmarks, contentDescription = "Закладки")
+                    }
+                    IconButton(onClick = { showEqualizerDialog = true }) {
+                        Icon(Icons.Filled.Equalizer, contentDescription = "Эквалайзер")
+                    }
+                    IconButton(onClick = { showChaptersDialog = true }) {
+                        Icon(Icons.Filled.QueueMusic, contentDescription = "Главы")
+                    }
+                    val seriesUrl = playing.book.seriesUrl?.takeIf { it.isNotBlank() }
+                    if (seriesUrl != null) {
+                        IconButton(
+                            onClick = {
+                                val series = playing.book.seriesTitle ?: "Серия"
+                                navController.navigate(
+                                    "series/${Uri.encode(app.bookCache.keyOf(playing.book))}" +
+                                        "?url=${Uri.encode(seriesUrl)}&title=${Uri.encode(series)}"
+                                )
+                            },
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Серия книг")
+                        }
+                    }
+                    val isFavorite = app.bookCache.keyOf(playing.book) in favoriteKeys
+                    IconButton(onClick = { scope.launch { app.favoritesStore.toggle(playing.book) } }) {
+                        Icon(
+                            imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                            contentDescription = "Избранное",
+                            tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    DownloadButton(app, app.bookCache.keyOf(playing.book))
+                }
+                Spacer(Modifier.height(4.dp))
                 PlayerSlider(
                     positionMs = snapshot.positionMs,
                     durationMs = snapshot.durationMs,
@@ -282,53 +403,6 @@ fun PlayerScreen(navController: NavHostController) {
                 }
                 Spacer(Modifier.height(12.dp))
             }
-            HorizontalDivider()
-            Text(
-                "Главы",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-            LazyColumn(
-                contentPadding = PaddingValues(bottom = 16.dp),
-                modifier = Modifier.weight(1f),
-            ) {
-                itemsIndexed(playing.tracks, key = { index, track -> "${track.url}#$index" }) { index, track ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { controller.playTrack(index) }
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = (index + 1).toString(),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = if (index == snapshot.trackIndex) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.width(28.dp),
-                        )
-                        Text(
-                            text = track.title,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = if (index == snapshot.trackIndex) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        if (index == snapshot.trackIndex) {
-                            Spacer(Modifier.width(8.dp))
-                            EqualizerBars(playing = snapshot.isPlaying, tint = MaterialTheme.colorScheme.primary)
-                            Spacer(Modifier.width(8.dp))
-                        }
-                        track.durationSeconds?.let {
-                            Text(
-                                formatSeconds(it),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-            }
         }
     }
     if (showSleepDialog) {
@@ -369,6 +443,31 @@ fun PlayerScreen(navController: NavHostController) {
             onDismiss = { showEqualizerDialog = false },
         )
     }
+    if (showChaptersDialog) {
+        nowPlaying?.let { playing ->
+            ChaptersDialog(
+                tracks = playing.tracks,
+                currentIndex = snapshot.trackIndex,
+                isPlaying = snapshot.isPlaying,
+                listState = trackListState,
+                onSelect = { index ->
+                    controller.playTrack(index)
+                    showChaptersDialog = false
+                },
+                onDismiss = { showChaptersDialog = false },
+            )
+        }
+    }
+    if (showSpeedDialog) {
+        SpeedDialog(
+            currentSpeed = snapshot.speed,
+            onSelect = { speed ->
+                viewModel.setSpeed(speed)
+                showSpeedDialog = false
+            },
+            onDismiss = { showSpeedDialog = false },
+        )
+    }
 }
 
 @Composable
@@ -404,6 +503,120 @@ private fun EqualizerBars(playing: Boolean, tint: Color) {
             )
         }
     }
+}
+
+@Composable
+private fun ChaptersDialog(
+    tracks: List<AudioTrack>,
+    currentIndex: Int,
+    isPlaying: Boolean,
+    listState: LazyListState,
+    onSelect: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    LaunchedEffect(currentIndex) {
+        if (currentIndex >= 0) {
+            listState.animateScrollToItem(currentIndex)
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Главы") },
+        text = {
+            LazyColumn(
+                modifier = Modifier.heightIn(max = 420.dp),
+                state = listState,
+            ) {
+                itemsIndexed(tracks, key = { index, track -> "${track.url}#$index" }) { index, track ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(index) }
+                            .tvFocus()
+                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = (index + 1).toString(),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (index == currentIndex) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.width(28.dp),
+                        )
+                        Text(
+                            text = track.title,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (index == currentIndex) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (index == currentIndex) {
+                            Spacer(Modifier.width(8.dp))
+                            EqualizerBars(playing = isPlaying, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        track.durationSeconds?.let {
+                            Text(
+                                formatSeconds(it),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Закрыть")
+            }
+        },
+    )
+}
+
+@Composable
+private fun SpeedDialog(
+    currentSpeed: Float,
+    onSelect: (Float) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val speeds = listOf(0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f, 2.5f, 3f)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Скорость воспроизведения") },
+        text = {
+            Column {
+                speeds.forEach { speed ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(speed) }
+                            .tvFocus()
+                            .padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            formatSpeed(speed),
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (speed == currentSpeed) {
+                            Icon(
+                                Icons.Filled.Check,
+                                contentDescription = "Выбрано",
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Готово")
+            }
+        },
+    )
 }
 
 @Composable
@@ -483,6 +696,7 @@ private fun BookmarkDialog(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { onSelect(bookmark) }
+                                .tvFocus()
                                 .padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -539,7 +753,7 @@ private fun EqualizerDialog(
                     .heightIn(max = 400.dp)
                     .verticalScroll(rememberScrollState()),
             ) {
-                if (!state.available) {
+                if (!state.available || state.maxLevelMb <= state.minLevelMb) {
                     Text(
                         "Эквалайзер не поддерживается на этом устройстве",
                         style = MaterialTheme.typography.bodyMedium,
@@ -594,7 +808,7 @@ private fun bandLabel(freqHz: Int): String =
     }
 
 private fun formatSleepRemaining(ms: Long): String {
-    val totalSeconds = ms / 1000
+    val totalSeconds = ms.coerceAtLeast(0L) / 1000
     val hours = totalSeconds / 3600
     val minutes = (totalSeconds % 3600) / 60
     val seconds = totalSeconds % 60

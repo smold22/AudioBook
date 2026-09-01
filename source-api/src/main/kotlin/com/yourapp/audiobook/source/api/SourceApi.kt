@@ -27,6 +27,8 @@ data class BookDetails(
     val tracks: List<AudioTrack> = emptyList(),
     val related: List<Book> = emptyList(),
     val seriesBooks: List<Book> = emptyList(),
+    /** Ссылка на торрент-файл (для торрент-источников, у которых нет прямых MP3). */
+    val torrentUrl: String? = null,
 )
 
 data class Genre(
@@ -59,6 +61,15 @@ interface AudiobookSource {
     suspend fun seriesBooks(seriesUrl: String, page: Int): List<Book> = emptyList()
 
     fun supportsSeries(): Boolean = false
+
+    /** Источник распространяет книги через торрент (без прямых MP3-ссылок). */
+    fun supportsTorrent(): Boolean = false
+
+    /**
+     * Скачивает содержимое торрент-файла для книги.
+     * Для сайтов с защитой (двухшаговая загрузка, Referer) реализация делает всё сама.
+     */
+    suspend fun fetchTorrentBytes(url: String): ByteArray? = null
 
     fun urlForId(id: String): String
 }

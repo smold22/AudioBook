@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.yourapp.audiobook.AudioBookApplication
 import com.yourapp.audiobook.source.api.AudiobookSource
 import com.yourapp.audiobook.source.api.Genre
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -30,6 +31,7 @@ class GenresViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<GenresState> = _state.asStateFlow()
 
     private var lastSourceId: String? = null
+    private var generation = 0L
 
     init {
         load()
@@ -42,14 +44,19 @@ class GenresViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun load() {
+        val gen = ++generation
         viewModelScope.launch {
             _state.update { it.copy(loading = true, error = null) }
             try {
                 val source = appContext.activeSource()
-                val genres = source?.genres().orEmpty()
+                val genres = source?.genres().orEmpty().distinctBy { it.url }
+                if (gen != generation) return@launch
                 _state.update { it.copy(genres = genres, loading = false) }
                 loadCounts(source, genres)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
+                if (gen != generation) return@launch
                 _state.update { it.copy(loading = false, error = e.message ?: "Ошибка загрузки") }
             }
         }
@@ -66,8 +73,7 @@ class GenresViewModel(app: Application) : AndroidViewModel(app) {
             pending.chunked(COUNT_CONCURRENCY).forEach { chunk ->
                 val results = chunk.map { genre ->
                     async(Dispatchers.IO) {
-                        genre.url to (runCatching { source.genreBookCount(genre.url) }.getOrNull()
-                            ?: runCatching { source.genreBookCount(genre.url) }.getOrNull())
+                        genre.url to runCatching { source.genreBookCount(genre.url) }.getOrNull()
                     }
                 }.awaitAll()
                 withContext(Dispatchers.Main) {

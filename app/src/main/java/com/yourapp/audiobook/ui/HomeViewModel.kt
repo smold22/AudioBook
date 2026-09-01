@@ -2,22 +2,16 @@ package com.yourapp.audiobook.ui
 
 import android.app.Application
 import androidx.lifecycle.viewModelScope
-import com.yourapp.audiobook.data.AuthorGender
 import com.yourapp.audiobook.source.api.Book
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 enum class HomeFeed(val label: String) {
     HOME("Главная"),
     NEW("Новинки"),
 }
-
-data class HomeCollections(
-    val new: List<Book> = emptyList(),
-)
 
 class HomeViewModel(app: Application) : BookListViewModel(app) {
 
@@ -26,9 +20,6 @@ class HomeViewModel(app: Application) : BookListViewModel(app) {
 
     private val _availableFeeds = MutableStateFlow(listOf(HomeFeed.HOME))
     val availableFeeds: StateFlow<List<HomeFeed>> = _availableFeeds.asStateFlow()
-
-    private val _collections = MutableStateFlow(HomeCollections())
-    val collections: StateFlow<HomeCollections> = _collections.asStateFlow()
 
     fun setFeed(newFeed: HomeFeed) {
         if (newFeed == _feed.value) return
@@ -48,26 +39,6 @@ class HomeViewModel(app: Application) : BookListViewModel(app) {
                 if (source?.supportsNew() == true) add(HomeFeed.NEW)
             }
             _availableFeeds.value = feeds
-        }
-        refreshCollections()
-    }
-
-    fun refreshCollections() {
-        viewModelScope.launch {
-            val source = appContext.activeSource() ?: return@launch
-            val hideFemale = appContext.settingsStore.hideFemaleAuthors.first()
-            val new = if (source.supportsNew()) {
-                runCatching { source.newBooks(1) }.getOrDefault(emptyList())
-            } else {
-                emptyList()
-            }
-            new.forEach { appContext.bookCache.put(it) }
-            val visible = if (hideFemale) {
-                new.filterNot { it.author != null && AuthorGender.isFemaleAuthor(it.author!!) }
-            } else {
-                new
-            }
-            _collections.value = HomeCollections(new = visible)
         }
     }
 

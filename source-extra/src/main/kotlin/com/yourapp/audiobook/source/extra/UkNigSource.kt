@@ -19,7 +19,7 @@ class UkNigSource(
     override val baseUrl = "https://uknig.com"
 
     override fun urlForId(bookId: String): String =
-        if (bookId.startsWith("http")) bookId else baseUrl + bookId
+        if (bookId.startsWith("http")) bookId else "$baseUrl/books/$bookId"
 
     override suspend fun home(page: Int): List<Book> =
         parseBooks(getHtml(client, if (page <= 1) baseUrl else "$baseUrl/?p=$page"))
@@ -114,7 +114,7 @@ class UkNigSource(
 
     override suspend fun books(url: String, page: Int): List<Book> {
         val target = if (page <= 1) url else {
-            if (url.contains("?")) url.replace(Regex("""p=\d+"""), "p=$page") else "$url?p=$page"
+            if (url.contains("?")) url.replace(Regex("""p=\d+""")) { "p=$page" } else "$url?p=$page"
         }
         return parseBooks(getHtml(client, target))
     }
@@ -123,7 +123,7 @@ class UkNigSource(
 
     override suspend fun seriesBooks(seriesUrl: String, page: Int): List<Book> {
         val target = if (page <= 1) seriesUrl else {
-            if (seriesUrl.contains("?")) seriesUrl.replace(Regex("""p=\d+"""), "p=$page") else "$seriesUrl?p=$page"
+            if (seriesUrl.contains("?")) seriesUrl.replace(Regex("""p=\d+""")) { "p=$page" } else "$seriesUrl?p=$page"
         }
         return parseBooks(getHtml(client, target))
     }

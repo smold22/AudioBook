@@ -1,6 +1,10 @@
 package com.yourapp.audiobook
 
 import android.app.Application
+import android.net.Uri
+import coil3.ImageLoader
+import coil3.network.okhttp.OkHttpNetworkFetcherFactory
+import okhttp3.OkHttpClient
 import com.yourapp.audiobook.data.BookCache
 import com.yourapp.audiobook.data.BackupManager
 import com.yourapp.audiobook.data.BookmarksStore
@@ -14,13 +18,20 @@ import com.yourapp.audiobook.data.SourceCooldown
 import com.yourapp.audiobook.data.sync.SyncManager
 import com.yourapp.audiobook.download.DownloadManager
 import com.yourapp.audiobook.player.PlayerController
+import com.yourapp.audiobook.player.stripRefParam
 import com.yourapp.audiobook.source.api.AudiobookSource
 import com.yourapp.audiobook.source.api.Book
 import com.yourapp.audiobook.source.api.SourceRegistry
+import com.yourapp.audiobook.source.extra.AknigaComSource
 import com.yourapp.audiobook.source.extra.AknigaSource
+import com.yourapp.audiobook.source.extra.AknigXyzSource
+import com.yourapp.audiobook.source.extra.AudioLibSource
+import com.yourapp.audiobook.source.extra.AudioknigiOnlainSource
+import com.yourapp.audiobook.source.extra.AuthorTodaySource
 import com.yourapp.audiobook.source.extra.Aknigi24Source
-import com.yourapp.audiobook.source.extra.ArchiveOrgSource
+import com.yourapp.audiobook.source.extra.AudioknigaLifeSource
 import com.yourapp.audiobook.source.extra.AudioknigiFunSource
+import com.yourapp.audiobook.source.extra.AudioknigiTopSource
 import com.yourapp.audiobook.source.extra.AudioknigaOneSource
 import com.yourapp.audiobook.source.extra.AudioknigiProSource
 import com.yourapp.audiobook.source.extra.AudiomirSource
@@ -28,19 +39,45 @@ import com.yourapp.audiobook.source.extra.BazaKnigSource
 import com.yourapp.audiobook.source.extra.BookZvukSource
 import com.yourapp.audiobook.source.extra.BookishSource
 import com.yourapp.audiobook.source.extra.GolosomSource
+import com.yourapp.audiobook.source.extra.KnigaAudioSource
 import com.yourapp.audiobook.source.extra.KnigaVuheSource
+import com.yourapp.audiobook.source.extra.KnigiAudioNetSource
 import com.yourapp.audiobook.source.extra.KnigobludSource
 import com.yourapp.audiobook.source.extra.Lis10bookSource
 import com.yourapp.audiobook.source.extra.OtrubSource
 import com.yourapp.audiobook.source.extra.PoleknigSource
+import com.yourapp.audiobook.source.extra.RuKnigaMeSource
+import com.yourapp.audiobook.source.extra.SlushatKnigiSource
+import com.yourapp.audiobook.source.extra.TAudioknigiMp3Source
 import com.yourapp.audiobook.source.extra.UkNigSource
 import com.yourapp.audiobook.source.izibuk.IziBukSource
+import com.yourapp.audiobook.torrent.TorrentManager
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeoutOrNull
 
 class AudioBookApplication : Application() {
+
+    /** Загрузчик изображений с учётом метки referer (ref=host) у CDN-обложек. */
+    lateinit var imageLoader: ImageLoader
+        private set
+
+    private fun setupImageLoader() {
+        val client = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val request = chain.request()
+                val (cleanUrl, ref) = Uri.parse(request.url.toString()).stripRefParam()
+                val builder = request.newBuilder()
+                if (ref != null) builder.header("Referer", ref)
+                if (cleanUrl.toString() != request.url.toString()) builder.url(cleanUrl.toString())
+                chain.proceed(builder.build())
+            }
+            .build()
+        imageLoader = ImageLoader.Builder(this)
+            .components { add(OkHttpNetworkFetcherFactory(client)) }
+            .build()
+    }
 
     lateinit var sourceRegistry: SourceRegistry
         private set
@@ -70,22 +107,28 @@ class AudioBookApplication : Application() {
         private set
     lateinit var playerController: PlayerController
         private set
+    lateinit var torrentManager: TorrentManager
+        private set
 
     suspend fun activeSource(): AudiobookSource? {
+        val hidden = settingsStore.hiddenSourceIds()
         val selectedId = settingsStore.currentSourceId()
-        return selectedId?.let { sourceRegistry.get(it) }
-            ?: sourceRegistry.sources.firstOrNull()
+        if (selectedId != null && selectedId !in hidden) {
+            sourceRegistry.get(selectedId)?.let { return it }
+        }
+        return sourceRegistry.sources.firstOrNull { it.id !in hidden }
     }
 
     suspend fun searchAll(query: String, page: Int): List<Book> = coroutineScope {
-        sourceRegistry.sources.map { source ->
+        val hidden = settingsStore.hiddenSourceIds()
+        sourceRegistry.sources.filter { it.id !in hidden }.map { source ->
             async {
                 if (sourceCooldown.isCoolingDown(source.id)) return@async emptyList()
                 withTimeoutOrNull(SEARCH_SOURCE_TIMEOUT_MS) {
                     runCatching { source.search(query, page) }
                         .onFailure { if (isBlockError(it)) sourceCooldown.mark(source.id) }
                         .getOrDefault(emptyList())
-                } ?: emptyList()
+                }?.take(MAX_RESULTS_PER_SOURCE) ?: emptyList()
             }
         }.awaitAll().flatten()
     }
@@ -97,10 +140,12 @@ class AudioBookApplication : Application() {
 
     private companion object {
         const val SEARCH_SOURCE_TIMEOUT_MS = 25_000L
+        const val MAX_RESULTS_PER_SOURCE = 10
     }
 
     override fun onCreate() {
         super.onCreate()
+        setupImageLoader()
         sourceRegistry = SourceRegistry().apply {
             register(IziBukSource())
             register(KnigaVuheSource())
@@ -110,7 +155,6 @@ class AudioBookApplication : Application() {
             register(PoleknigSource())
             register(UkNigSource())
             register(AudioknigiProSource())
-            register(ArchiveOrgSource())
             register(GolosomSource())
             register(BookishSource())
             register(AudioknigiFunSource())
@@ -120,6 +164,18 @@ class AudioBookApplication : Application() {
             register(AudioknigaOneSource())
             register(AudiomirSource())
             register(OtrubSource())
+            register(SlushatKnigiSource())
+            register(AudioknigaLifeSource())
+            register(AudioknigiTopSource())
+            register(AknigaComSource())
+            register(AuthorTodaySource())
+            register(RuKnigaMeSource())
+            register(TAudioknigiMp3Source())
+            register(AudioLibSource())
+            register(AknigXyzSource())
+            register(KnigaAudioSource())
+            register(KnigiAudioNetSource())
+            register(AudioknigiOnlainSource())
         }
         bookCache = BookCache()
         progressStore = ProgressStore(this)
@@ -127,6 +183,7 @@ class AudioBookApplication : Application() {
         sourceCooldown = SourceCooldown()
         settingsStore = SettingsStore(this)
         downloadManager = DownloadManager(this, settingsStore)
+        torrentManager = TorrentManager(this)
         backupManager = BackupManager()
         favoritesStore = FavoritesStore(this)
         historyStore = HistoryStore(this)

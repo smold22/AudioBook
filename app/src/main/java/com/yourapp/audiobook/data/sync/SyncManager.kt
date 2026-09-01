@@ -22,12 +22,9 @@ import java.util.concurrent.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -38,6 +35,7 @@ data class SyncState(
     val signedIn: Boolean = false,
     val accountEmail: String? = null,
     val syncing: Boolean = false,
+    val restoring: Boolean = false,
     val lastSyncAtMs: Long? = null,
     val lastError: String? = null,
 )
@@ -60,30 +58,24 @@ class SyncManager(
     private val gson: Gson = GsonBuilder().create()
     private val firebaseAuth = FirebaseAuth.getInstance()
     private val store = FirebaseSyncStore(gson)
+    private val syncStateStore = SyncStateStore(context)
 
     private val _state = MutableStateFlow(SyncState())
     val state: StateFlow<SyncState> = _state.asStateFlow()
 
+    private val _backups = MutableStateFlow<List<BackupInfo>>(emptyList())
+    val backups: StateFlow<List<BackupInfo>> = _backups.asStateFlow()
+
+    private var started = false
+    private var reSyncQueued = false
+
     fun start() {
+        if (started) return
+        started = true
         currentUser()?.let {
             _state.update { s ->
                 s.copy(signedIn = true, accountEmail = it.email ?: s.accountEmail)
             }
-        }
-        scope.launch {
-            delay(INITIAL_SYNC_DELAY_MS)
-            if (currentUser() != null) syncNow()
-        }
-        scope.launch {
-            merge(
-                favoritesStore.changes,
-                historyStore.changes,
-                progressStore.changes,
-                bookmarksStore.changes,
-                settingsStore.changes,
-            )
-                .debounce(AUTO_SYNC_DEBOUNCE_MS)
-                .collect { syncNow() }
         }
     }
 
@@ -151,46 +143,122 @@ class SyncManager(
                 GoogleSignIn.getClient(context, GoogleSignInOptions.DEFAULT_SIGN_IN).signOut()
             }
             _state.value = SyncState()
+            _backups.value = emptyList()
         }
     }
 
     fun syncNow() {
-        if (_state.value.syncing) return
+        if (_state.value.syncing || _state.value.restoring) {
+            reSyncQueued = true
+            return
+        }
         scope.launch { doSync() }
     }
 
-    private suspend fun doSync() = mutex.withLock {
-        if (_state.value.syncing || currentUser() == null) return@withLock
-        _state.update { it.copy(syncing = true, lastError = null) }
+    /** Обновляет список доступных резервных копий. */
+    fun refreshBackups() {
+        currentUser()?.let { user ->
+            scope.launch { refreshBackups(user.uid) }
+        }
+    }
+
+    /** Восстанавливает выбранную резервную копию из облака. */
+    fun restoreBackup(backupId: String) {
+        if (_state.value.syncing || _state.value.restoring) return
+        scope.launch { doRestore(backupId) }
+    }
+
+    private suspend fun refreshBackups(uid: String) {
+        runCatching { store.listBackups(uid) }
+            .onSuccess { _backups.value = it }
+    }
+
+    private suspend fun doRestore(backupId: String) = mutex.withLock {
+        val user = currentUser() ?: return@withLock
+        if (_state.value.syncing || _state.value.restoring) return@withLock
+        _state.update { it.copy(restoring = true, lastError = null) }
         try {
-            val local = withContext(Dispatchers.IO) {
-                SyncData(
-                    updatedAtMs = System.currentTimeMillis(),
-                    favorites = favoritesStore.snapshot(),
-                    history = historyStore.snapshot(),
-                    progress = progressStore.snapshot(),
-                    bookmarks = bookmarksStore.snapshot(),
-                    settings = settingsStore.snapshotAll(),
-                )
-            }
-
-            val remote = store.read(currentUser()!!.uid)
-
-            val merged = remote?.mergedWith(local) ?: local
-
-            applyLocal(merged)
-            store.write(currentUser()!!.uid, merged)
+            val data = store.readBackup(user.uid, backupId)
+                ?: throw IllegalStateException("Резервная копия не найдена")
+            applyLocal(data)
+            store.write(user.uid, data.copy(updatedAtMs = System.currentTimeMillis()))
             _state.update {
                 it.copy(lastSyncAtMs = System.currentTimeMillis(), lastError = null)
             }
+            _backups.value = store.listBackups(user.uid)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            _state.update { s -> s.copy(lastError = "Ошибка восстановления: ${e.message}") }
+        } finally {
+            _state.update { it.copy(restoring = false) }
+        }
+    }
+
+    private suspend fun doSync() = mutex.withLock {
+        val user = currentUser() ?: return@withLock
+        if (_state.value.syncing || _state.value.restoring) return@withLock
+        _state.update { it.copy(syncing = true, lastError = null) }
+        try {
+            val uid = user.uid
+            val localChangedAt = syncStateStore.lastChangeMs()
+            val local = snapshotLocal()
+
+            val remote = store.read(uid)
+
+            // Пользователь мог выйти из аккаунта во время сетевого обмена — не пишем чужие данные.
+            if (currentUser()?.uid != uid) return@withLock
+
+            // Побеждают данные той стороны, которая менялась позже (last-write-wins).
+            // При неизвестных метках времени (0) — объединяем, сохраняя записи обеих сторон.
+            // Пустой новый аккаунт забирает данные из облака, старый — не теряет локальное.
+            val merged: SyncData = when {
+                remote == null -> local
+                localChangedAt > 0L && remote.updatedAtMs > 0L && localChangedAt >= remote.updatedAtMs -> local
+                !hasLocalData(local) && localChangedAt == 0L -> remote
+                else -> remote.unionWith(local)
+            }
+
+            if (merged !== local) {
+                // Перечитываем текущее локальное состояние и объединяем с результатом,
+                // чтобы не затереть правки, сделанные во время сетевого обмена.
+                val currentLocal = snapshotLocal()
+                applyLocal(currentLocal.unionWith(merged))
+            }
+            store.write(uid, merged)
+            _state.update {
+                it.copy(lastSyncAtMs = System.currentTimeMillis(), lastError = null)
+            }
+            _backups.value = store.listBackups(uid)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             _state.update { s -> s.copy(lastError = "Ошибка синхронизации: ${e.message}") }
         } finally {
             _state.update { it.copy(syncing = false) }
+            if (reSyncQueued && !_state.value.restoring) {
+                reSyncQueued = false
+                syncNow()
+            }
         }
     }
+
+    private suspend fun snapshotLocal(): SyncData = withContext(Dispatchers.IO) {
+        SyncData(
+            updatedAtMs = syncStateStore.lastChangeMs(),
+            favorites = favoritesStore.snapshot(),
+            history = historyStore.snapshot(),
+            progress = progressStore.snapshot(),
+            bookmarks = bookmarksStore.snapshot(),
+            settings = settingsStore.snapshotAll(),
+        )
+    }
+
+    private fun hasLocalData(data: SyncData): Boolean =
+        data.favorites.isNotEmpty() ||
+            data.history.isNotEmpty() ||
+            data.progress.isNotEmpty() ||
+            data.bookmarks.isNotEmpty()
 
     private suspend fun applyLocal(data: SyncData) {
         favoritesStore.restore(data.favorites)
@@ -204,8 +272,6 @@ class SyncManager(
 
     companion object {
         const val DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
-        private const val AUTO_SYNC_DEBOUNCE_MS = 20_000L
-        private const val INITIAL_SYNC_DELAY_MS = 8_000L
         private const val MAX_HISTORY_ENTRIES = 100
     }
 }

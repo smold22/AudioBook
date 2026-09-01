@@ -1,5 +1,6 @@
 ﻿package com.yourapp.audiobook.source.extra
 
+import com.google.gson.JsonElement
 import com.google.gson.JsonParser
 import com.yourapp.audiobook.source.api.AudioTrack
 import com.yourapp.audiobook.source.api.AudiobookSource
@@ -88,7 +89,7 @@ class AknigaSource(
     override suspend fun books(url: String, page: Int): List<Book> {
         val target = if (page <= 1) url else {
             if (Regex("""/page\d+/""").containsMatchIn(url)) {
-                url.replace(Regex("""/page\d+/"""), "/page$page/")
+                url.replace(Regex("""/page\d+/""")) { "/page$page/" }
             } else {
                 url.trimEnd('/') + "/page$page/"
             }
@@ -223,10 +224,14 @@ class AknigaSource(
                 items.mapNotNull { el ->
                     if (!el.isJsonObject) return@mapNotNull null
                     val it = el.asJsonObject
+                    val itemUrl = it.get("key")?.asString?.takeIf { k -> k.isNotBlank() }?.let { k ->
+                        val slug = obj.get("slug")?.asString ?: ""
+                        "$srv/b/$bid/$k/$slug.mp3"
+                    } ?: audioUrl
                     AudioTrack(
                         title = it.get("title")?.asString ?: return@mapNotNull null,
-                        url = audioUrl,
-                        durationSeconds = it.get("duration")?.asInt,
+                        url = itemUrl,
+                        durationSeconds = durationSeconds(it.get("duration")),
                     )
                 }
             } else {
@@ -236,6 +241,9 @@ class AknigaSource(
             emptyList()
         }
     }
+
+    private fun durationSeconds(el: JsonElement?): Int? =
+        el?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asInt
 
     private fun stripAuthor(name: String, author: String): String =
         name.removePrefix("$author - ").removePrefix("$author -").trim()

@@ -59,7 +59,7 @@ fun GenresScreen(navController: NavHostController) {
                 }
             }
         } else {
-            items(state.genres, key = { it.url }) { genre ->
+            items(state.genres.distinctBy { it.url }, key = { it.url }) { genre ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -68,6 +68,7 @@ fun GenresScreen(navController: NavHostController) {
                                 "genre/${Uri.encode(genre.url)}?name=${Uri.encode(genre.name)}",
                             )
                         }
+                        .tvFocus()
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {

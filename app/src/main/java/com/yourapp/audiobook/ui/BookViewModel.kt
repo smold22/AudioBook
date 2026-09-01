@@ -11,6 +11,7 @@ import com.yourapp.audiobook.data.TrackPosition
 import com.yourapp.audiobook.player.PlaybackService
 import com.yourapp.audiobook.source.api.Book
 import com.yourapp.audiobook.source.api.BookDetails
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -34,6 +35,8 @@ class BookViewModel(app: Application, private val bookKey: String) : AndroidView
 
     private val appContext = app as AudioBookApplication
 
+    private fun bookKey(book: Book): String = "${book.sourceId}:${book.id}"
+
     private val _state = MutableStateFlow(BookScreenState())
     val state: StateFlow<BookScreenState> = _state.asStateFlow()
 
@@ -53,7 +56,7 @@ class BookViewModel(app: Application, private val bookKey: String) : AndroidView
         val book = _state.value.book ?: return
         val controller = appContext.playerController
         val nowPlaying = controller.nowPlaying.value ?: return
-        if (nowPlaying.book.id != book.id) return
+        if (bookKey(nowPlaying.book) != bookKey) return
         val position = controller.player.currentPosition.coerceAtLeast(0L)
         val track = controller.player.currentMediaItemIndex
         if (position <= 0 && !controller.player.isPlaying) return
@@ -70,7 +73,7 @@ class BookViewModel(app: Application, private val bookKey: String) : AndroidView
             if (offline != null) {
                 val book = offline.book.copy(title = offline.book.title.ifBlank { _state.value.book?.title.orEmpty() })
                 appContext.bookCache.put(book)
-                val progress = appContext.progressStore.load(book.id)
+                val progress = appContext.progressStore.load(bookKey)
                 val currentIndex = appContext.playerController.player.currentMediaItemIndex
                     .takeIf {
                         appContext.playerController.player.mediaItemCount > 0 &&
@@ -125,7 +128,7 @@ class BookViewModel(app: Application, private val bookKey: String) : AndroidView
                         .sortedWith(compareBy<Book> { it.seriesIndex == null }.thenBy { it.seriesIndex }),
                     hideFemale,
                 ).onEach { appContext.bookCache.put(it) }
-                val progress = appContext.progressStore.load(merged.id)
+                val progress = appContext.progressStore.load(bookKey)
                 val currentIndex = appContext.playerController.player.currentMediaItemIndex
                     .takeIf { appContext.playerController.player.mediaItemCount > 0 && appContext.playerController.nowPlaying.value?.book?.id == merged.id }
                 _state.update {
@@ -139,6 +142,8 @@ class BookViewModel(app: Application, private val bookKey: String) : AndroidView
                         seriesBooks = seriesBooks,
                     )
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 val message = e.message ?: "Ошибка загрузки"
                 if (message.contains("удалена") || message.contains("фрагмент") || message.contains("правообладател")) {
@@ -167,6 +172,8 @@ class BookViewModel(app: Application, private val bookKey: String) : AndroidView
 
     fun continuePlayback() {
         val progress = _state.value.progress ?: return
+        val tracks = _state.value.details?.tracks ?: return
+        if (progress.trackIndex !in tracks.indices) return
         playTrack(progress.trackIndex, progress.positionMs)
     }
 }

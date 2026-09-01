@@ -92,7 +92,7 @@ class OtrubSource(
 
     override suspend fun books(url: String, page: Int): List<Book> {
         val target = if (page <= 1) url else {
-            if (url.contains("?")) url.replace(Regex("""p=\d+"""), "p=$page") else "$url?p=$page"
+            if (url.contains("?")) url.replace(Regex("""p=\d+""")) { "p=$page" } else "$url?p=$page"
         }
         return parseBooks(getHtml(client, target))
     }
@@ -101,7 +101,7 @@ class OtrubSource(
 
     override suspend fun seriesBooks(seriesUrl: String, page: Int): List<Book> {
         val target = if (page <= 1) seriesUrl else {
-            if (seriesUrl.contains("?")) seriesUrl.replace(Regex("""p=\d+"""), "p=$page")
+            if (seriesUrl.contains("?")) seriesUrl.replace(Regex("""p=\d+""")) { "p=$page" }
             else "$seriesUrl?p=$page"
         }
         val html = getHtml(client, target)
@@ -155,8 +155,9 @@ class OtrubSource(
         val start = html.indexOf("window.XSPlayer(")
         if (start < 0) return emptyList()
         val jsonStart = html.indexOf('{', start)
+        if (jsonStart < 0) return emptyList()
         val jsonEnd = findJsonEnd(html, jsonStart)
-        if (jsonStart < 0 || jsonEnd < 0) return emptyList()
+        if (jsonEnd < 0) return emptyList()
         return try {
             val obj = JsonParser.parseString(html.substring(jsonStart, jsonEnd + 1)).asJsonObject
             if (obj.get("blocked")?.asBoolean == true) return emptyList()

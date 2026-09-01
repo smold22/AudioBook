@@ -91,7 +91,9 @@ fun DownloadsScreen(navController: NavHostController) {
     val viewModel: DownloadsViewModel = viewModel()
     val items by viewModel.items.collectAsStateWithLifecycle()
     val hideFemaleAuthors by app.settingsStore.hideFemaleAuthors.collectAsStateWithLifecycle(initialValue = false)
-    val viewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
+    val rawViewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
+    // Сетка в 3 столбца доступна только в горизонтальном режиме и на Android TV.
+    val viewMode = if (rawViewMode == SettingsStore.VIEW_GRID3 && !isLandscapeOrTv) SettingsStore.VIEW_GRID else rawViewMode
     var pendingDelete by remember { mutableStateOf<DownloadedEntry?>(null) }
     val visibleItems = remember(items, hideFemaleAuthors) {
         AuthorGender.filterFemale(items.map { it.book }, hideFemaleAuthors)
@@ -129,10 +131,10 @@ fun DownloadsScreen(navController: NavHostController) {
         }
         HorizontalDivider()
 
-        if (items.isEmpty()) {
+        if (items.isEmpty() || visibleItems.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
-                    "Нет скачанных книг",
+                    if (items.isEmpty()) "Нет скачанных книг" else "Все скачанные книги скрыты фильтром",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(24.dp),

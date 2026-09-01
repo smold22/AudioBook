@@ -44,23 +44,25 @@ fun GenreBooksScreen(genreUrl: String, genreName: String, navController: NavHost
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
-    val viewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
+    val rawViewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
+    // Сетка в 3 столбца доступна только в горизонтальном режиме и на Android TV.
+    val viewMode = if (rawViewMode == SettingsStore.VIEW_GRID3 && !isLandscapeOrTv) SettingsStore.VIEW_GRID else rawViewMode
 
     val shouldLoadMore by remember {
         derivedStateOf {
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            val displayCount = if (viewMode == SettingsStore.VIEW_GRID) {
-                (state.books.size + 1) / 2
-            } else {
-                state.books.size
+            val displayCount = when (viewMode) {
+                SettingsStore.VIEW_GRID3 -> (state.books.size + 2) / 3
+                SettingsStore.VIEW_GRID -> (state.books.size + 1) / 2
+                else -> state.books.size
             }
-            lastVisible >= (displayCount - 3)
+            displayCount >= 5 && lastVisible >= (displayCount - 3)
         }
     }
     LaunchedEffect(Unit) {
         if (state.books.isEmpty() && !state.loading) viewModel.refresh()
     }
-    LaunchedEffect(shouldLoadMore) {
+    LaunchedEffect(shouldLoadMore, state.books.size, state.loading) {
         if (shouldLoadMore) viewModel.loadMore()
     }
 

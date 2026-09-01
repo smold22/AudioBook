@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.yourapp.audiobook.AudioBookApplication
 import kotlinx.coroutines.launch
@@ -35,9 +36,11 @@ import kotlinx.coroutines.launch
 @Composable
 fun SourceScreen(navController: NavHostController) {
     val app = LocalContext.current.applicationContext as AudioBookApplication
-    val sources = app.sourceRegistry.sources
+    val allSources = app.sourceRegistry.sources
     val scope = rememberCoroutineScope()
     var selectedId by remember { mutableStateOf<String?>(null) }
+    val hiddenIds by app.settingsStore.hiddenSources.collectAsStateWithLifecycle(initialValue = emptySet())
+    val sources = allSources.filter { it.id !in hiddenIds }
 
     LaunchedEffect(Unit) {
         selectedId = app.settingsStore.currentSourceId()
@@ -72,6 +75,7 @@ fun SourceScreen(navController: NavHostController) {
                                 selectedId = source.id
                             }
                         }
+                        .tvFocus()
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -102,7 +106,8 @@ fun SourceScreen(navController: NavHostController) {
             if (sources.isEmpty()) {
                 item {
                     Text(
-                        "Источники не зарегистрированы",
+                        if (allSources.isEmpty()) "Источники не зарегистрированы"
+                        else "Все источники скрыты",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(16.dp),

@@ -42,7 +42,9 @@ fun FavoritesScreen(navController: NavHostController) {
     val favorites by app.favoritesStore.favorites.collectAsStateWithLifecycle(initialValue = emptyList())
     val deadKeys by app.deadBooksStore.deadKeys.collectAsStateWithLifecycle(initialValue = emptySet())
     val hideFemaleAuthors by app.settingsStore.hideFemaleAuthors.collectAsStateWithLifecycle(initialValue = false)
-    val viewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
+    val rawViewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
+    // Сетка в 3 столбца доступна только в горизонтальном режиме и на Android TV.
+    val viewMode = if (rawViewMode == SettingsStore.VIEW_GRID3 && !isLandscapeOrTv) SettingsStore.VIEW_GRID else rawViewMode
     val visibleFavorites = remember(favorites, deadKeys, hideFemaleAuthors) {
         favorites.filterNot { book ->
             "${book.sourceId}:${book.id}" in deadKeys ||

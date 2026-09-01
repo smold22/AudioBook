@@ -61,7 +61,9 @@ class ProgressStore(context: Context) {
         if (snapshot.isEmpty()) return
         appContext.progressDataStore.edit { prefs ->
             snapshot.forEach { (name, value) ->
-                prefs[stringPreferencesKey(name)] = value
+                if (name.startsWith(PROGRESS_PREFIX)) {
+                    prefs[stringPreferencesKey(name)] = value
+                }
             }
         }
         changeSignal.emit(Unit)
@@ -72,7 +74,9 @@ class ProgressStore(context: Context) {
             prefs.asMap().keys.filter { it.name.startsWith(PROGRESS_PREFIX) }
                 .forEach { prefs.remove(it) }
             snapshot.forEach { (name, value) ->
-                prefs[stringPreferencesKey(name)] = value
+                if (name.startsWith(PROGRESS_PREFIX)) {
+                    prefs[stringPreferencesKey(name)] = value
+                }
             }
         }
         changeSignal.emit(Unit)
