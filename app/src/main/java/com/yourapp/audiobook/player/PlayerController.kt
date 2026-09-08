@@ -23,6 +23,7 @@ import com.yourapp.audiobook.data.BookmarksStore
 import com.yourapp.audiobook.data.EqualizerStore
 import com.yourapp.audiobook.data.HistoryStore
 import com.yourapp.audiobook.data.ProgressStore
+import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.source.api.AudioTrack
 import com.yourapp.audiobook.source.api.Book
 import com.yourapp.audiobook.source.api.BookDetails
@@ -33,6 +34,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 
@@ -65,6 +67,7 @@ class PlayerController(
     private val progressStore: ProgressStore,
     private val bookmarksStore: BookmarksStore,
     private val equalizerStore: EqualizerStore,
+    private val settingsStore: SettingsStore,
 ) {
 
     private val appContext = context.applicationContext
@@ -200,6 +203,13 @@ class PlayerController(
     val equalizer = EqualizerController(equalizerStore, scope)
 
     init {
+        // Восстанавливаем сохранённую скорость воспроизведения.
+        scope.launch {
+            val savedSpeed = settingsStore.playbackSpeed.first()
+            if (savedSpeed != 1f) {
+                player.playbackParameters = PlaybackParameters(savedSpeed)
+            }
+        }
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 equalizer.attachIfNeeded(player.audioSessionId)
@@ -281,7 +291,7 @@ class PlayerController(
         _sleepTimer.value = SleepTimer(mode = SleepTimerMode.END_OF_CHAPTER)
     }
 
-    fun play(details: BookDetails, startIndex: Int, startPositionMs: Long, localUris: List<Uri>? = null) {
+    fun play(details: BookDetails, startIndex: Int, startPositionMs: Long, localUris: List<Uri?>? = null) {
         if (details.tracks.isEmpty()) return
         _sleepTimer.value = null
         val items = details.tracks.mapIndexed { index, track ->
@@ -394,13 +404,14 @@ class PlayerController(
         if (player.mediaItemCount == 0) return 1f
         val current = player.playbackParameters.speed
         val next = speeds[(speeds.indexOfFirst { it == current } + 1).let { if (it >= speeds.size) 0 else it }]
-        player.playbackParameters = PlaybackParameters(next)
+        setSpeed(next)
         return next
     }
 
     fun setSpeed(speed: Float) {
         if (player.mediaItemCount == 0) return
         player.playbackParameters = PlaybackParameters(speed)
+        scope.launch { settingsStore.setPlaybackSpeed(speed) }
     }
 
     fun stopAndClear() {

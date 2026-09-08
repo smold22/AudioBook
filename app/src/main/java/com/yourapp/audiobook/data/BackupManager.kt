@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
 data class BackupData(
     val version: Int = 1,
     val favorites: List<Book>? = null,
+    val watchlist: List<Book>? = null,
     val history: List<HistoryEntry>? = null,
     val progress: Map<String, String>? = null,
     val theme: String? = null,
@@ -28,6 +29,7 @@ class BackupManager {
     suspend fun backup(
         dirPath: String,
         favorites: List<Book>,
+        watchlist: List<Book>,
         history: List<HistoryEntry>,
         progress: Map<String, String>,
         theme: String,
@@ -37,6 +39,7 @@ class BackupManager {
                 BackupData(
                     version = 1,
                     favorites = favorites,
+                    watchlist = watchlist,
                     history = history,
                     progress = progress,
                     theme = theme,

@@ -6,6 +6,7 @@ import com.yourapp.audiobook.source.api.Book
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 enum class HomeFeed(val label: String) {
@@ -45,7 +46,15 @@ class HomeViewModel(app: Application) : BookListViewModel(app) {
     override suspend fun loadPage(page: Int): List<Book> {
         val source = appContext.activeSource() ?: return emptyList()
         return when (_feed.value) {
-            HomeFeed.HOME -> source.home(page)
+            HomeFeed.HOME -> {
+                val genre = appContext.settingsStore.homeGenre.first()
+                if (genre != null && genre.sourceId == source.id) {
+                    source.books(genre.url, page)
+                        .map { if (it.genre == null) it.copy(genre = genre.name) else it }
+                } else {
+                    source.home(page)
+                }
+            }
             HomeFeed.NEW -> source.newBooks(page)
         }
     }

@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
@@ -50,6 +49,7 @@ import com.yourapp.audiobook.ui.components.bookItems
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 data class DownloadedEntry(
@@ -66,14 +66,17 @@ class DownloadsViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         viewModelScope.launch {
-            appContext.downloadManager.downloadedBooks.collect { books ->
-                val entries = books.keys.mapNotNull { bookKey ->
+            combine(
+                appContext.downloadManager.downloadedBooks,
+                appContext.downloadManager.downloadedTracks,
+            ) { books, tracks ->
+                val keys = books.keys + tracks.keys
+                keys.mapNotNull { bookKey ->
                     runCatching { appContext.downloadManager.offlineDetails(bookKey) }.getOrNull()
                         ?.book
                         ?.let { DownloadedEntry(bookKey, it) }
-                }
-                _items.value = entries.sortedBy { it.book.title }
-            }
+                }.sortedBy { it.book.title }
+            }.collect { _items.value = it }
         }
     }
 
@@ -124,9 +127,6 @@ fun DownloadsScreen(navController: NavHostController) {
             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = { navController.popBackStack() }) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
-            }
             Text("Загрузки", style = MaterialTheme.typography.titleLarge)
         }
         HorizontalDivider()

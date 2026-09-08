@@ -40,7 +40,7 @@ fun GenreBooksScreen(genreUrl: String, genreName: String, navController: NavHost
     val app = LocalContext.current.applicationContext as AudioBookApplication
     val viewModel: GenreBooksViewModel = viewModel(
         key = genreUrl,
-        factory = GenreBooksViewModelFactory(app, genreUrl),
+        factory = GenreBooksViewModelFactory(app, genreUrl, genreName),
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
@@ -56,7 +56,7 @@ fun GenreBooksScreen(genreUrl: String, genreName: String, navController: NavHost
                 SettingsStore.VIEW_GRID -> (state.books.size + 1) / 2
                 else -> state.books.size
             }
-            displayCount >= 5 && lastVisible >= (displayCount - 3)
+            displayCount >= 5 && lastVisible >= (displayCount / 4)
         }
     }
     LaunchedEffect(Unit) {

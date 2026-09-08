@@ -1,9 +1,6 @@
 package com.yourapp.audiobook.ui
 
-import android.app.Activity
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -24,6 +21,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,7 +44,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
-import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.yourapp.audiobook.AudioBookApplication
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.source.api.Book
@@ -58,6 +55,7 @@ fun HomeScreen(navController: NavHostController) {
     val viewModel: HomeViewModel = viewModel()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val sourceId by app.settingsStore.selectedSourceId.collectAsStateWithLifecycle(initialValue = null)
+    val homeGenre by app.settingsStore.homeGenre.collectAsStateWithLifecycle(initialValue = null)
     val rawViewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
     // Сетка в 3 столбца доступна только в горизонтальном режиме и на Android TV.
     val viewMode = if (rawViewMode == SettingsStore.VIEW_GRID3 && !isLandscapeOrTv) SettingsStore.VIEW_GRID else rawViewMode
@@ -71,7 +69,7 @@ fun HomeScreen(navController: NavHostController) {
                 SettingsStore.VIEW_GRID -> (state.books.size + 1) / 2
                 else -> state.books.size
             }
-            displayCount >= 5 && lastVisible >= (displayCount - 3)
+            displayCount >= 5 && lastVisible >= (displayCount / 4)
         }
     }
 
@@ -82,6 +80,9 @@ fun HomeScreen(navController: NavHostController) {
     }
     LaunchedEffect(sourceId) {
         viewModel.refreshForSource(sourceId)
+    }
+    LaunchedEffect(homeGenre) {
+        viewModel.refresh()
     }
     LaunchedEffect(shouldLoadMore, state.books.size, state.loading) {
         if (shouldLoadMore) viewModel.loadMore()
@@ -101,6 +102,9 @@ fun HomeScreen(navController: NavHostController) {
                 style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.padding(start = 12.dp).weight(1f),
             )
+            IconButton(onClick = { navController.navigate("search") }) {
+                Icon(Icons.Filled.Search, contentDescription = "Поиск")
+            }
             GoogleSyncButton()
             IconButton(onClick = { navController.navigate("source") }) {
                 Icon(Icons.Filled.Info, contentDescription = "Источники")
@@ -131,8 +135,9 @@ fun HomeScreen(navController: NavHostController) {
         ) {
         if (feed == HomeFeed.HOME) {
             item(key = "all-books-title") {
+                val genreActive = homeGenre?.takeIf { it.sourceId == sourceId }
                 Text(
-                    text = "Все книги",
+                    text = genreActive?.name ?: "Все книги",
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
@@ -180,23 +185,7 @@ private fun GoogleSyncButton() {
     val context = LocalContext.current
     val app = context.applicationContext as AudioBookApplication
     val syncState by app.syncManager.state.collectAsStateWithLifecycle()
-    val signInClient = remember {
-        runCatching { app.syncManager.buildSignInClient() }.getOrNull()
-    }
-    val signInLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val data = result.data ?: return@rememberLauncherForActivityResult
-            runCatching {
-                GoogleSignIn.getSignedInAccountFromIntent(data).getResult()
-            }.onSuccess { account ->
-                app.syncManager.onSignInOK(account)
-            }.onFailure {
-                app.syncManager.onSignInError(it)
-            }
-        }
-    }
+    val googleSignIn = rememberGoogleSignInController()
     val spin = if (syncState.syncing) {
         val transition = rememberInfiniteTransition(label = "syncSpin")
         transition.animateFloat(
@@ -213,10 +202,10 @@ private fun GoogleSyncButton() {
             if (syncState.signedIn) {
                 app.syncManager.syncNow()
             } else {
-                signInClient?.signInIntent?.let { signInLauncher.launch(it) }
+                googleSignIn.onSignInClick()
             }
         },
-        enabled = signInClient != null && !syncState.syncing,
+        enabled = googleSignIn.available && !syncState.syncing,
     ) {
         Icon(
             imageVector = Icons.Outlined.Sync,

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
@@ -24,8 +25,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -52,6 +55,7 @@ import androidx.navigation.navArgument
 import com.yourapp.audiobook.AudioBookApplication
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.ui.components.MiniPlayer
+import kotlin.math.roundToInt
 
 private data class TabItem(
     val route: String,
@@ -61,9 +65,9 @@ private data class TabItem(
 
 private val tabs = listOf(
     TabItem("home", "Главная", Icons.Filled.Home),
-    TabItem("search", "Поиск", Icons.Filled.Search),
     TabItem("genres", "Жанры", Icons.AutoMirrored.Filled.List),
     TabItem("history", "История", Icons.Filled.History),
+    TabItem("downloads", "Загрузки", Icons.Filled.Download),
     TabItem("me", "Я", Icons.Filled.Person),
 )
 
@@ -103,6 +107,21 @@ fun AppNavHost(onExitApp: () -> Unit) {
 
     val tvMode = isTvMode
 
+    // На Android TV плеер открывается сразу при начале воспроизведения.
+    var lastAutoOpenedKey by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(tvMode, nowPlaying) {
+        val np = nowPlaying
+        if (np == null) {
+            lastAutoOpenedKey = null
+        } else if (tvMode) {
+            val key = app.bookCache.keyOf(np.book)
+            if (key != lastAutoOpenedKey) {
+                lastAutoOpenedKey = key
+                navController.navigate("player") { launchSingleTop = true }
+            }
+        }
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         bottomBar = {
@@ -141,6 +160,7 @@ fun AppNavHost(onExitApp: () -> Unit) {
                         if (showNav) {
                             NavigationBar(
                                 modifier = Modifier.height(underlayHeight + navBarInset),
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
                             ) {
                                 tabs.forEach { tab ->
                                     val selected = currentRoute == tab.route
@@ -157,6 +177,13 @@ fun AppNavHost(onExitApp: () -> Unit) {
                                         },
                                         icon = { Icon(tab.icon, contentDescription = null) },
                                         label = if (hideTabLabels) null else { { Text(tab.label) } },
+                                        colors = NavigationBarItemDefaults.colors(
+                                            selectedIconColor = MaterialTheme.colorScheme.onSurface,
+                                            selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                                            indicatorColor = MaterialTheme.colorScheme.primary,
+                                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        ),
                                         modifier = Modifier.height(underlayHeight).tvFocus(),
                                     )
                                 }
@@ -169,19 +196,21 @@ fun AppNavHost(onExitApp: () -> Unit) {
     ) { innerPadding ->
         if (tvMode) {
             Row(modifier = Modifier.fillMaxSize()) {
-                TvSideNav(
-                    tabs = tabs,
-                    currentRoute = currentRoute,
-                    hideLabels = hideTabLabels,
-                    onTabSelected = { route ->
-                        navController.navigate(route) {
-                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
-                    modifier = Modifier.padding(start = innerPadding.calculateLeftPadding(LayoutDirection.Ltr)),
-                )
+                if (currentRoute != "player") {
+                    TvSideNav(
+                        tabs = tabs,
+                        currentRoute = currentRoute,
+                        hideLabels = hideTabLabels,
+                        onTabSelected = { route ->
+                            navController.navigate(route) {
+                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                        modifier = Modifier.padding(start = innerPadding.calculateLeftPadding(LayoutDirection.Ltr)),
+                    )
+                }
                 NavHost(
                     navController = navController,
                     startDestination = "home",
@@ -228,6 +257,13 @@ private fun TvSideNav(
                 label = if (hideLabels) null else {
                     { Text(tab.label, style = MaterialTheme.typography.labelSmall) }
                 },
+                colors = NavigationRailItemDefaults.colors(
+                    selectedIconColor = MaterialTheme.colorScheme.onSurface,
+                    selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                    indicatorColor = MaterialTheme.colorScheme.primary,
+                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
                 modifier = Modifier.tvFocus().height(52.dp),
             )
         }
@@ -253,6 +289,9 @@ private fun NavGraphBuilder.appRoutes(navController: NavHostController) {
     }
     composable("favorites") {
         FavoritesScreen(navController)
+    }
+    composable("watchlist") {
+        WatchlistScreen(navController)
     }
     composable(
         route = "genre/{url}?name={name}",

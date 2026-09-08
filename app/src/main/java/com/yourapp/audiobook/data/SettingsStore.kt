@@ -3,6 +3,7 @@ package com.yourapp.audiobook.data
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -39,7 +40,14 @@ class SettingsStore(context: Context) {
     private val hideFemaleAuthorsKey = booleanPreferencesKey("hide_female_authors")
     private val closeOnBackLongPressKey = booleanPreferencesKey("close_on_back_long_press")
     private val uiModeKey = stringPreferencesKey("ui_mode")
+    private val accentColorKey = stringPreferencesKey("accent_color")
+    private val customAccentColorKey = stringPreferencesKey("custom_accent_color")
     private val hiddenSourcesKey = stringSetPreferencesKey("hidden_sources")
+    private val homeGenreSourceKey = stringPreferencesKey("home_genre_source")
+    private val homeGenreUrlKey = stringPreferencesKey("home_genre_url")
+    private val homeGenreNameKey = stringPreferencesKey("home_genre_name")
+    private val appIconKey = stringPreferencesKey("app_icon")
+    private val playbackSpeedKey = floatPreferencesKey("playback_speed")
 
     val downloadFolder: Flow<String?> =
         appContext.settingsDataStore.data.map { it[folderKey] }
@@ -77,9 +85,48 @@ class SettingsStore(context: Context) {
     val uiMode: Flow<String?> =
         appContext.settingsDataStore.data.map { it[uiModeKey] }
 
+    /** Акцентный цвет приложения (null-значение ключа — динамический системный). */
+    val accentColor: Flow<String> =
+        appContext.settingsDataStore.data.map { it[accentColorKey] ?: ACCENT_DYNAMIC }
+
+    /** Свой цвет акцента в формате AARRGGBB (для [ACCENT_CUSTOM]). */
+    val customAccentColor: Flow<String?> =
+        appContext.settingsDataStore.data.map { it[customAccentColorKey] }
+
     /** Идентификаторы скрытых источников. */
     val hiddenSources: Flow<Set<String>> =
         appContext.settingsDataStore.data.map { it[hiddenSourcesKey].orEmpty() }
+
+    /** Жанр, книги которого показываются на главном экране (null — все книги). */
+    val homeGenre: Flow<HomeGenre?> =
+        appContext.settingsDataStore.data.map { prefs ->
+            val sourceId = prefs[homeGenreSourceKey] ?: return@map null
+            val url = prefs[homeGenreUrlKey] ?: return@map null
+            val name = prefs[homeGenreNameKey] ?: return@map null
+            HomeGenre(sourceId = sourceId, url = url, name = name)
+        }
+
+    /** Выбранная иконка приложения ("default" или "alt1"…"alt5"). */
+    val appIcon: Flow<String> =
+        appContext.settingsDataStore.data.map { prefs ->
+            when (val value = prefs[appIconKey]) {
+                null -> APP_ICON_DEFAULT
+                // Совместимость со старым ключом первой альтернативной иконки.
+                "alt" -> APP_ICON_ALT
+                else -> value
+            }
+        }
+
+    /** Запомненная скорость воспроизведения (по умолчанию 1x). */
+    val playbackSpeed: Flow<Float> =
+        appContext.settingsDataStore.data.map { it[playbackSpeedKey] ?: 1f }
+
+    suspend fun setPlaybackSpeed(speed: Float) {
+        appContext.settingsDataStore.edit { prefs ->
+            prefs[playbackSpeedKey] = speed
+        }
+        changeSignal.emit(Unit)
+    }
 
     suspend fun setResumeOnLaunch(enabled: Boolean) {
         appContext.settingsDataStore.edit { prefs ->
@@ -145,6 +192,20 @@ class SettingsStore(context: Context) {
         changeSignal.emit(Unit)
     }
 
+    suspend fun setAccentColor(accent: String) {
+        appContext.settingsDataStore.edit { prefs ->
+            prefs[accentColorKey] = accent
+        }
+        changeSignal.emit(Unit)
+    }
+
+    suspend fun setCustomAccentColor(argb: Int) {
+        appContext.settingsDataStore.edit { prefs ->
+            prefs[customAccentColorKey] = String.format("%08X", argb)
+        }
+        changeSignal.emit(Unit)
+    }
+
     suspend fun currentUiMode(): String? {
         val mode = appContext.settingsDataStore.data.first()[uiModeKey]
         if (mode != null) {
@@ -163,6 +224,28 @@ class SettingsStore(context: Context) {
             } else {
                 prefs[hiddenSourcesKey].orEmpty() - id
             }
+        }
+        changeSignal.emit(Unit)
+    }
+
+    suspend fun setHomeGenre(genre: HomeGenre?) {
+        appContext.settingsDataStore.edit { prefs ->
+            if (genre == null) {
+                prefs.remove(homeGenreSourceKey)
+                prefs.remove(homeGenreUrlKey)
+                prefs.remove(homeGenreNameKey)
+            } else {
+                prefs[homeGenreSourceKey] = genre.sourceId
+                prefs[homeGenreUrlKey] = genre.url
+                prefs[homeGenreNameKey] = genre.name
+            }
+        }
+        changeSignal.emit(Unit)
+    }
+
+    suspend fun setAppIcon(icon: String) {
+        appContext.settingsDataStore.edit { prefs ->
+            prefs[appIconKey] = icon
         }
         changeSignal.emit(Unit)
     }
@@ -235,6 +318,45 @@ class SettingsStore(context: Context) {
         appContext.settingsDataStore.edit { prefs ->
             prefs.remove(stringPreferencesKey("$bookFolderPrefix$bookKey"))
             prefs.remove(stringPreferencesKey("$bookMetaPrefix$bookKey"))
+            prefs.remove(stringPreferencesKey("$bookTracksPrefix$bookKey"))
+        }
+    }
+
+    suspend fun saveBookMeta(bookKey: String, metaJson: String) {
+        appContext.settingsDataStore.edit { prefs ->
+            prefs[stringPreferencesKey("$bookMetaPrefix$bookKey")] = metaJson
+        }
+    }
+
+    /** Имена файлов треков, скачанных отдельно (по одному). */
+    suspend fun downloadedTrackNames(): Map<String, Set<String>> {
+        val prefs = appContext.settingsDataStore.data.first()
+        return buildMap {
+            prefs.asMap().keys.forEach { key ->
+                val name = key.name
+                if (name.startsWith(bookTracksPrefix)) {
+                    val bookKey = name.removePrefix(bookTracksPrefix)
+                    put(
+                        bookKey,
+                        prefs[stringPreferencesKey(name)]
+                            .orEmpty()
+                            .split(SET_ITEM_SEPARATOR)
+                            .filter { it.isNotEmpty() }
+                            .toSet(),
+                    )
+                }
+            }
+        }
+    }
+
+    suspend fun saveDownloadedTracks(bookKey: String, names: Set<String>) {
+        appContext.settingsDataStore.edit { prefs ->
+            if (names.isEmpty()) {
+                prefs.remove(stringPreferencesKey("$bookTracksPrefix$bookKey"))
+            } else {
+                prefs[stringPreferencesKey("$bookTracksPrefix$bookKey")] =
+                    names.joinToString(SET_ITEM_SEPARATOR)
+            }
         }
     }
 
@@ -275,7 +397,9 @@ class SettingsStore(context: Context) {
         val result = mutableMapOf<String, String>()
         prefs.asMap().forEach { (key, value) ->
             val name = key.name
-            if (name == downloadFolderName || name.startsWith(bookFolderPrefix) || name.startsWith(bookMetaPrefix)) {
+            if (name == downloadFolderName || name.startsWith(bookFolderPrefix) ||
+                name.startsWith(bookMetaPrefix) || name.startsWith(bookTracksPrefix)
+            ) {
                 return@forEach
             }
             when (value) {
@@ -293,7 +417,9 @@ class SettingsStore(context: Context) {
         if (snapshot.isEmpty()) return
         appContext.settingsDataStore.edit { prefs ->
             snapshot.forEach { (name, value) ->
-                if (name == downloadFolderName || name.startsWith(bookFolderPrefix) || name.startsWith(bookMetaPrefix)) {
+                if (name == downloadFolderName || name.startsWith(bookFolderPrefix) ||
+                    name.startsWith(bookMetaPrefix) || name.startsWith(bookTracksPrefix)
+                ) {
                     return@forEach
                 }
                 when (name) {
@@ -330,11 +456,28 @@ class SettingsStore(context: Context) {
         const val UI_MODE_TOUCH = "touch"
         const val UI_MODE_TV = "tv"
 
+        const val ACCENT_DYNAMIC = "dynamic"
+        const val ACCENT_CUSTOM = "custom"
+        const val ACCENT_PURPLE = "purple"
+        const val ACCENT_BLUE = "blue"
+        const val ACCENT_GREEN = "green"
+        const val ACCENT_ORANGE = "orange"
+        const val ACCENT_RED = "red"
+        const val ACCENT_TEAL = "teal"
+        const val ACCENT_PINK = "pink"
+        const val ACCENT_INDIGO = "indigo"
+        const val ACCENT_CYAN = "cyan"
+        const val ACCENT_BROWN = "brown"
+
+        const val APP_ICON_DEFAULT = "default"
+        const val APP_ICON_ALT = "alt1"
+
         private const val SET_ITEM_SEPARATOR = "\u0001"
 
         const val downloadFolderName = "download_folder"
         const val bookFolderPrefix = "bookFolder:"
         const val bookMetaPrefix = "bookMeta:"
+        const val bookTracksPrefix = "bookTracks:"
     }
 }
 
@@ -343,3 +486,10 @@ enum class IgnoreSection(val key: String, val label: String) {
     AUTHOR("ignored_authors", "Авторы"),
     READER("ignored_readers", "Чтецы"),
 }
+
+/** Жанр, отображаемый на главном экране: источник, ссылка и название. */
+data class HomeGenre(
+    val sourceId: String,
+    val url: String,
+    val name: String,
+)

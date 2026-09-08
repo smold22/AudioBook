@@ -21,9 +21,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -48,11 +51,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import coil3.compose.AsyncImage
 import com.yourapp.audiobook.AudioBookApplication
+import com.yourapp.audiobook.download.DownloadService
 import com.yourapp.audiobook.download.DownloadStatus
 import com.yourapp.audiobook.source.api.AudioTrack
 import com.yourapp.audiobook.ui.components.BookSectionRow
 import com.yourapp.audiobook.ui.components.DownloadButton
 import com.yourapp.audiobook.ui.components.rememberDownloadStarter
+import com.yourapp.audiobook.ui.components.rememberTrackDownloadStarter
 import kotlinx.coroutines.launch
 
 class BookViewModelFactory(
@@ -75,9 +80,13 @@ fun BookScreen(bookKey: String, navController: NavHostController) {
     val scope = rememberCoroutineScope()
     val favoriteKeys by app.favoritesStore.favoriteKeys.collectAsStateWithLifecycle(initialValue = emptySet())
     val isFavorite = bookKey in favoriteKeys
+    val watchlistKeys by app.watchlistStore.watchlistKeys.collectAsStateWithLifecycle(initialValue = emptySet())
+    val isInWatchlist = bookKey in watchlistKeys
     val downloadStates by app.downloadManager.states.collectAsStateWithLifecycle()
     val downloadedKeys by app.downloadManager.downloadedKeys.collectAsStateWithLifecycle()
+    val downloadedTracks by app.downloadManager.downloadedTracks.collectAsStateWithLifecycle()
     val startDownload = rememberDownloadStarter(app, bookKey)
+    val startTrackDownload = rememberTrackDownloadStarter(app, bookKey)
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -101,8 +110,15 @@ fun BookScreen(bookKey: String, navController: NavHostController) {
                             tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    IconButton(onClick = { scope.launch { app.watchlistStore.toggle(book) } }) {
+                        Icon(
+                            imageVector = if (isInWatchlist) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                            contentDescription = "Буду слушать",
+                            tint = if (isInWatchlist) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    DownloadButton(app, bookKey)
                 }
-                DownloadButton(app, bookKey)
             }
         }
 
@@ -246,6 +262,10 @@ fun BookScreen(bookKey: String, navController: NavHostController) {
                         index = index,
                         isCurrent = index == state.currentTrackIndex,
                         onClick = { viewModel.playTrack(index) },
+                        downloaded = bookKey in downloadedKeys ||
+                            DownloadService.trackFileName(index, track) in downloadedTracks[bookKey].orEmpty(),
+                        downloadEnabled = downloadStates[bookKey]?.status != DownloadStatus.DOWNLOADING,
+                        onDownload = { startTrackDownload(index) },
                     )
                 }
             }
@@ -335,6 +355,9 @@ private fun TrackRow(
     index: Int,
     isCurrent: Boolean,
     onClick: () -> Unit,
+    downloaded: Boolean,
+    downloadEnabled: Boolean,
+    onDownload: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -366,10 +389,20 @@ private fun TrackRow(
                 )
             }
         }
-        Icon(
-            imageVector = Icons.Filled.PlayArrow,
-            contentDescription = "Слушать",
-            tint = MaterialTheme.colorScheme.primary,
-        )
+        if (downloaded) {
+            Icon(
+                imageVector = Icons.Filled.CheckCircle,
+                contentDescription = "Трек скачан",
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        } else {
+            IconButton(onClick = onDownload, enabled = downloadEnabled) {
+                Icon(
+                    imageVector = Icons.Filled.Download,
+                    contentDescription = "Скачать трек",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }

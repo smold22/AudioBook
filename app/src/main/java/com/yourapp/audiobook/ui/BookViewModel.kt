@@ -157,8 +157,14 @@ class BookViewModel(app: Application, private val bookKey: String) : AndroidView
     fun playTrack(index: Int, startPositionMs: Long = 0L) {
         val details = _state.value.details ?: return
         viewModelScope.launch {
-            val localUris = if (appContext.downloadManager.isDownloaded(bookKey)) {
-                appContext.downloadManager.offlineTrackUris(bookKey, details.tracks.size)
+            val trackNames = details.tracks.mapIndexed { i, track ->
+                com.yourapp.audiobook.download.DownloadService.trackFileName(i, track)
+            }
+            val localUris = if (
+                appContext.downloadManager.isDownloaded(bookKey) ||
+                appContext.downloadManager.hasPartialTracks(bookKey)
+            ) {
+                appContext.downloadManager.offlineTrackUris(bookKey, trackNames)
             } else {
                 null
             }

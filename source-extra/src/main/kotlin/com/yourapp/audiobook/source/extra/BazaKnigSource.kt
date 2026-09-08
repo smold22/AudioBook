@@ -139,6 +139,8 @@ class BazaKnigSource(
             val reader = item.select(".short-items li").firstOrNull { it.text().contains("Читает") }
                 ?.selectFirst("b")?.text().toNullIfBlank()
             val cycleLi = item.select(".short-items li").firstOrNull { it.text().contains("Цикл") }
+            val genre = item.select(".short-items li").firstOrNull { it.text().contains("Жанр") }
+                ?.select("a")?.eachText()?.joinToString(", ").toNullIfBlank()
             if (title.isBlank()) return@mapNotNull null
             Book(
                 sourceId = id,
@@ -149,7 +151,7 @@ class BazaKnigSource(
                 author = author,
                 reader = reader,
                 durationText = null,
-                genre = null,
+                genre = genre,
                 seriesTitle = cycleLi?.select("a")?.eachText()?.joinToString(", ").toNullIfBlank(),
                 seriesIndex = cycleLi?.select("b")?.lastOrNull()?.text()?.filter(Char::isDigit)
                     ?.toIntOrNull()?.takeIf { it > 0 },

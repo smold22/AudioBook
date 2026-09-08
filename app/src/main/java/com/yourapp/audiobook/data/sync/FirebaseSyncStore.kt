@@ -46,9 +46,10 @@ class FirebaseSyncStore(private val gson: Gson) {
         val doc = firestore.collection(COLLECTION_USERS).document(uid).get().awaitTask()
         if (!doc.exists()) return null
         return SyncData(
-            version = 2,
+            version = 3,
             updatedAtMs = doc.getLong(FIELD_UPDATED_AT) ?: 0L,
             favorites = decodeList<Book>(doc.getString(FIELD_FAVORITES)),
+            watchlist = decodeList<Book>(doc.getString(FIELD_WATCHLIST)),
             history = decodeList<HistoryEntry>(doc.getString(FIELD_HISTORY)),
             progress = decodeMap(doc.get(FIELD_PROGRESS)),
             bookmarks = decodeBookmarks(doc.getString(FIELD_BOOKMARKS)),
@@ -75,9 +76,10 @@ class FirebaseSyncStore(private val gson: Gson) {
         val doc = backupsRef(uid).document(backupId).get().awaitTask()
         if (!doc.exists()) return null
         return SyncData(
-            version = 2,
+            version = 3,
             updatedAtMs = doc.getLong(FIELD_UPDATED_AT) ?: 0L,
             favorites = decodeList<Book>(doc.getString(FIELD_FAVORITES)),
+            watchlist = decodeList<Book>(doc.getString(FIELD_WATCHLIST)),
             history = decodeList<HistoryEntry>(doc.getString(FIELD_HISTORY)),
             progress = decodeMap(doc.get(FIELD_PROGRESS)),
             bookmarks = decodeBookmarks(doc.getString(FIELD_BOOKMARKS)),
@@ -90,6 +92,7 @@ class FirebaseSyncStore(private val gson: Gson) {
         val now = System.currentTimeMillis()
         val values = hashMapOf<String, Any?>(
             FIELD_FAVORITES to gson.toJson(data.favorites),
+            FIELD_WATCHLIST to gson.toJson(data.watchlist),
             FIELD_HISTORY to gson.toJson(data.history),
             FIELD_PROGRESS to data.progress,
             FIELD_BOOKMARKS to gson.toJson(data.bookmarks),
@@ -99,6 +102,20 @@ class FirebaseSyncStore(private val gson: Gson) {
         )
         backupsRef(uid).add(values).awaitTask()
         prune(uid)
+    }
+
+    /** Удаляет одну резервную копию. */
+    suspend fun deleteBackup(uid: String, backupId: String) {
+        backupsRef(uid).document(backupId).delete().awaitTask()
+    }
+
+    /** Удаляет все резервные копии пользователя вместе с устаревшим документом users/{uid}. */
+    suspend fun clearBackups(uid: String) {
+        val docs = backupsRef(uid).get().awaitTask()
+        for (doc in docs.documents) {
+            doc.reference.delete().awaitTask()
+        }
+        firestore.collection(COLLECTION_USERS).document(uid).delete().awaitTask()
     }
 
     private suspend fun prune(uid: String) {
@@ -153,6 +170,7 @@ class FirebaseSyncStore(private val gson: Gson) {
         private const val COLLECTION_USERS = "users"
         private const val COLLECTION_BACKUPS = "backups"
         private const val FIELD_FAVORITES = "favorites"
+        private const val FIELD_WATCHLIST = "watchlist"
         private const val FIELD_HISTORY = "history"
         private const val FIELD_PROGRESS = "progress"
         private const val FIELD_BOOKMARKS = "bookmarks"

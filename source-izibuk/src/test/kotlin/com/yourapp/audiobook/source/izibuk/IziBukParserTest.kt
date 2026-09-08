@@ -229,4 +229,67 @@ class IziBukParserTest {
     fun returnsEmptyListForEmptyPage() {
         assertTrue(IziBukSource.parseBookList("<html><body><div id='books_list'></div></body></html>", "izibuk", "https://pda.izib.uk/").isEmpty())
     }
+
+    @Test
+    fun fillsGenreFromActiveSubcategory() {
+        val html = """
+            <html><head><title>Слушать аудиокниги жанра - Фантастика, фэнтези</title></head><body>
+            <div class="_6eb726">
+                <a href="/genres">Жанры</a>
+                <a class="_123f1f" href="/genre1">Фантастика, фэнтези</a>
+            </div>
+            <div class="_b4137e">
+                <a href="/genre1?subcategory=3" class="_8819f5">Попаданцы в магию</a>
+                <a href="/genre1?subcategory=1" class="_8819f5 _8212a4">Попаданцы</a>
+            </div>
+            <div id="books_list" class="_17facf">
+                <div class="_ccb9b7 _5c0f1a" id="book141596">
+                    <a class="_bce453" href="/art141596">
+                        <img class="_76d12c" src="https://r2.audioknigi.xyz/pic/1.jpg" alt="img"/>
+                    </a>
+                    <div class="_802db0">
+                        <div class="_3dc935"><a href="/art141596" class="_3dc935">Книга</a></div>
+                        <div class="_eeab32"><span class="_a6370b _81deee"></span>
+                            <a href="/author28703">Автор</a>
+                        </div>
+                        <div class="_eeab32"><span class="_a6370b _8ff5b6"></span>
+                            <a href="/reader10866">Чтец</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            </body></html>
+        """.trimIndent()
+        val books = IziBukSource.parseBookList(html, "izibuk", "https://pda.izib.uk/")
+        assertEquals(1, books.size)
+        assertEquals("Попаданцы", books[0].genre)
+    }
+
+    @Test
+    fun fillsGenreFromBreadcrumbWithoutSubcategory() {
+        val html = """
+            <html><head><title>Слушать аудиокниги жанра - Фантастика, фэнтези</title></head><body>
+            <div class="_6eb726">
+                <a href="/genres">Жанры</a>
+                <a class="_123f1f" href="/genre1">Фантастика, фэнтези</a>
+            </div>
+            <div id="books_list">
+                <div class="_ccb9b7 _5c0f1a" id="book1">
+                    <a class="_bce453" href="/art1">
+                        <img class="_76d12c" src="https://r2.audioknigi.xyz/pic/1.jpg" alt="img"/>
+                    </a>
+                    <div class="_3dc935"><a href="/art1" class="_3dc935">Книга</a></div>
+                </div>
+            </div>
+            </body></html>
+        """.trimIndent()
+        val books = IziBukSource.parseBookList(html, "izibuk", "https://pda.izib.uk/")
+        assertEquals("Фантастика, фэнтези", books[0].genre)
+    }
+
+    @Test
+    fun titleFallbackNeedsGenreMarker() {
+        assertEquals("Фантастика, фэнтези", IziBukSource.genreFromPageTitle("Слушать аудиокниги жанра - Фантастика, фэнтези"))
+        assertEquals(null, IziBukSource.genreFromPageTitle("Аудиокниги - Слушать онлайн бесплатно!"))
+    }
 }

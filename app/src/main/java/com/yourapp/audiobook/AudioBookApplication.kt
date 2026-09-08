@@ -15,6 +15,7 @@ import com.yourapp.audiobook.data.HistoryStore
 import com.yourapp.audiobook.data.ProgressStore
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.data.SourceCooldown
+import com.yourapp.audiobook.data.WatchlistStore
 import com.yourapp.audiobook.data.sync.SyncManager
 import com.yourapp.audiobook.download.DownloadManager
 import com.yourapp.audiobook.player.PlayerController
@@ -22,6 +23,11 @@ import com.yourapp.audiobook.player.stripRefParam
 import com.yourapp.audiobook.source.api.AudiobookSource
 import com.yourapp.audiobook.source.api.Book
 import com.yourapp.audiobook.source.api.SourceRegistry
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import com.yourapp.audiobook.source.extra.AknigaComSource
 import com.yourapp.audiobook.source.extra.AknigaSource
 import com.yourapp.audiobook.source.extra.AknigXyzSource
@@ -35,6 +41,7 @@ import com.yourapp.audiobook.source.extra.AudioknigiTopSource
 import com.yourapp.audiobook.source.extra.AudioknigaOneSource
 import com.yourapp.audiobook.source.extra.AudioknigiProSource
 import com.yourapp.audiobook.source.extra.AudiomirSource
+import com.yourapp.audiobook.source.extra.AumeSource
 import com.yourapp.audiobook.source.extra.BazaKnigSource
 import com.yourapp.audiobook.source.extra.BookZvukSource
 import com.yourapp.audiobook.source.extra.BookishSource
@@ -52,6 +59,7 @@ import com.yourapp.audiobook.source.extra.TAudioknigiMp3Source
 import com.yourapp.audiobook.source.extra.UkNigSource
 import com.yourapp.audiobook.source.izibuk.IziBukSource
 import com.yourapp.audiobook.torrent.TorrentManager
+import com.yourapp.audiobook.update.UpdateManager
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -97,6 +105,8 @@ class AudioBookApplication : Application() {
         private set
     lateinit var favoritesStore: FavoritesStore
         private set
+    lateinit var watchlistStore: WatchlistStore
+        private set
     lateinit var historyStore: HistoryStore
         private set
     lateinit var bookmarksStore: BookmarksStore
@@ -108,6 +118,8 @@ class AudioBookApplication : Application() {
     lateinit var playerController: PlayerController
         private set
     lateinit var torrentManager: TorrentManager
+        private set
+    lateinit var updateManager: UpdateManager
         private set
 
     suspend fun activeSource(): AudiobookSource? {
@@ -143,12 +155,13 @@ class AudioBookApplication : Application() {
         const val MAX_RESULTS_PER_SOURCE = 10
     }
 
-    override fun onCreate() {
+override fun onCreate() {
         super.onCreate()
         setupImageLoader()
-        sourceRegistry = SourceRegistry().apply {
+sourceRegistry = SourceRegistry().apply {
             register(IziBukSource())
             register(KnigaVuheSource())
+            register(AumeSource())
             register(AknigaSource())
             register(BazaKnigSource())
             register(KnigobludSource())
@@ -184,20 +197,34 @@ class AudioBookApplication : Application() {
         settingsStore = SettingsStore(this)
         downloadManager = DownloadManager(this, settingsStore)
         torrentManager = TorrentManager(this)
+        updateManager = UpdateManager(this)
         backupManager = BackupManager()
         favoritesStore = FavoritesStore(this)
+watchlistStore = WatchlistStore(this)
         historyStore = HistoryStore(this)
         bookmarksStore = BookmarksStore(this)
         equalizerStore = EqualizerStore(this)
-        syncManager = SyncManager(
+syncManager = SyncManager(
             this,
             favoritesStore,
+            watchlistStore,
             historyStore,
             progressStore,
             bookmarksStore,
             settingsStore,
         )
-        syncManager.start()
-        playerController = PlayerController(this, historyStore, progressStore, bookmarksStore, equalizerStore)
+syncManager.start()
+        playerController = PlayerController(this, historyStore, progressStore, bookmarksStore, equalizerStore, settingsStore)
+        selfHealIconState()
+    }
+
+    /** Восстанавливает корректное состояние компонентов иконки лаунчера при старте. */
+    private fun selfHealIconState() {
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            runCatching {
+                AppIconSwitcher.apply(this@AudioBookApplication, settingsStore.appIcon.first())
+            }
+        }
     }
 }
+

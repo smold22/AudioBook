@@ -33,6 +33,9 @@ class BackupManagerTest {
             favorites = listOf(
                 Book(sourceId = "test", id = "1", title = "Книга", url = "https://test/1"),
             ),
+            watchlist = listOf(
+                Book(sourceId = "test", id = "2", title = "Позже", url = "https://test/2"),
+            ),
             history = emptyList(),
             progress = mapOf("book:123" to "2;60000", "book:456" to "0;1000"),
             theme = "dark",
@@ -42,12 +45,13 @@ class BackupManagerTest {
         assertEquals("2;60000", restored.progress["book:123"])
         assertEquals("dark", restored.theme)
         assertEquals(1, restored.favorites!!.size)
+        assertEquals(1, restored.watchlist!!.size)
     }
 
     @Test
     fun emptyProgressAndNullTheme() = runBlocking {
         val manager = BackupManager()
-        val path = manager.backup(tempDir.absolutePath, emptyList(), emptyList(), emptyMap(), "")!!
+        val path = manager.backup(tempDir.absolutePath, emptyList(), emptyList(), emptyList(), emptyMap(), "")!!
         val restored = manager.restore(path)
         assertTrue(restored.progress!!.isEmpty())
         assertTrue(restored.theme.isNullOrEmpty())

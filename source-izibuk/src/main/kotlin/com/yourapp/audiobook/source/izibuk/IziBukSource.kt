@@ -146,6 +146,7 @@ class IziBukSource(
 
         fun parseBookList(html: String, sourceId: String, baseUrl: String): List<Book> {
             val doc = Jsoup.parse(html, baseUrl)
+            val fallbackGenre = pageGenre(doc)
             return doc.select("._ccb9b7").mapNotNull { item ->
                 if (item.selectFirst("._09ddb7") != null) return@mapNotNull null
                 val link = item.select("a[href^=/art]").firstOrNull() ?: return@mapNotNull null
@@ -164,7 +165,8 @@ class IziBukSource(
                     author = item.select("a[href^=/author]").firstOrNull()?.text().toNullIfBlank(),
                     reader = item.select("a[href^=/reader]").firstOrNull()?.text().toNullIfBlank(),
                     durationText = duration,
-                    genre = item.select("._680f12 a").firstOrNull()?.text().toNullIfBlank(),
+                    genre = item.select("._680f12 a").firstOrNull()?.text().toNullIfBlank()
+                        ?: fallbackGenre,
                     seriesTitle = seriesLink?.text().toNullIfBlank(),
                     seriesIndex = item.attr("data-serie-index").toIntOrNull()?.takeIf { it > 0 },
                     seriesUrl = seriesLink?.absUrl("href").toNullIfBlank(),
@@ -174,6 +176,7 @@ class IziBukSource(
 
         fun parseSeriesBooks(html: String, sourceId: String, baseUrl: String): List<Book> {
             val doc = Jsoup.parse(html, baseUrl)
+            val fallbackGenre = pageGenre(doc)
             return doc.select("._ccb9b7").mapNotNull { item ->
                 if (item.selectFirst("._09ddb7") != null) return@mapNotNull null
                 val link = item.select("a[href^=/art]").firstOrNull() ?: return@mapNotNull null
@@ -192,11 +195,29 @@ class IziBukSource(
                     author = item.select("a[href^=/author]").firstOrNull()?.text().toNullIfBlank(),
                     reader = item.select("a[href^=/reader]").firstOrNull()?.text().toNullIfBlank(),
                     durationText = duration,
-                    genre = item.select("._680f12 a").firstOrNull()?.text().toNullIfBlank(),
+                    genre = item.select("._680f12 a").firstOrNull()?.text().toNullIfBlank()
+                        ?: fallbackGenre,
                     seriesTitle = seriesLink?.text().toNullIfBlank(),
                     seriesIndex = item.attr("data-serie-index").toIntOrNull()?.takeIf { it > 0 },
                     seriesUrl = seriesLink?.absUrl("href").toNullIfBlank(),
                 )
+            }
+        }
+
+        /** Жанр страницы: активный поджанр, хлебные крошки или заголовок «…жанра - <жанр>». */
+        fun pageGenre(doc: org.jsoup.nodes.Document): String? =
+            doc.select("._8819f5._8212a4").firstOrNull()?.text()?.trim()
+                ?: doc.select("._6eb726 a._123f1f").firstOrNull()?.text()?.trim()
+                ?: genreFromPageTitle(doc.title())
+
+        /** Жанр из заголовка страницы вида «… жанра - <жанр>» (на страницах жанров у карточек жанра нет). */
+        fun genreFromPageTitle(title: String): String? {
+            val marker = "жанра - "
+            val idx = title.lastIndexOf(marker)
+            return if (idx >= 0) {
+                title.substring(idx + marker.length).trim().toNullIfBlank()
+            } else {
+                null
             }
         }
 

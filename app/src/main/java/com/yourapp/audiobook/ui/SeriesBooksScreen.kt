@@ -61,7 +61,7 @@ fun SeriesBooksScreen(
                 SettingsStore.VIEW_GRID -> (state.books.size + 1) / 2
                 else -> state.books.size
             }
-            displayCount >= 5 && lastVisible >= (displayCount - 3)
+            displayCount >= 5 && lastVisible >= (displayCount / 4)
         }
     }
     LaunchedEffect(Unit) {

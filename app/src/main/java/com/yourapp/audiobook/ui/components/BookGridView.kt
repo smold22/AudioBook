@@ -146,6 +146,15 @@ private fun BookGridItem(
                 }
             }
         }
+        book.genre?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         Text(
             text = book.title,
             style = MaterialTheme.typography.bodyMedium,

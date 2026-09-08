@@ -73,6 +73,7 @@ fun SourceScreen(navController: NavHostController) {
                             scope.launch {
                                 app.settingsStore.setSourceId(source.id)
                                 selectedId = source.id
+                                navController.popBackStack()
                             }
                         }
                         .tvFocus()

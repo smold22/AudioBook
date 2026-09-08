@@ -12,6 +12,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.MediaType.Companion.toMediaType
 import org.jsoup.Jsoup
 import java.io.IOException
+import java.net.Proxy
 import java.util.concurrent.TimeUnit
 
 const val USER_AGENT =
@@ -54,6 +55,10 @@ fun buildClient(): OkHttpClient = OkHttpClient.Builder()
     .connectTimeout(20, TimeUnit.SECONDS)
     .readTimeout(60, TimeUnit.SECONDS)
     .cookieJar(MemoryCookieJar())
+    // Игнорируем системный HTTP-прокси: телефоны с прокси в настройках Wi-Fi
+    // (например, для блокировки рекламы) получают через него устаревшие или
+    // заблокированные ответы, из-за чего страницы не загружаются.
+    .proxy(Proxy.NO_PROXY)
     .addInterceptor { chain ->
         val original = chain.request()
         val request = original.newBuilder()

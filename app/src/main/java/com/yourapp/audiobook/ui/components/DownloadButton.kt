@@ -16,6 +16,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -40,6 +43,31 @@ fun rememberDownloadStarter(app: AudioBookApplication, bookKey: String): () -> U
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
             app.downloadManager.startDownload(context, bookKey)
+        }
+    }
+}
+
+/** Стартер скачивания одного трека книги. */
+@Composable
+fun rememberTrackDownloadStarter(app: AudioBookApplication, bookKey: String): (Int) -> Unit {
+    val context = LocalContext.current
+    var pendingIndex by remember { mutableStateOf(-1) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted && pendingIndex >= 0) {
+            app.downloadManager.startDownloadTrack(context, bookKey, pendingIndex)
+        }
+    }
+    return { index ->
+        val needsNotificationPermission = Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        if (needsNotificationPermission) {
+            pendingIndex = index
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            app.downloadManager.startDownloadTrack(context, bookKey, index)
         }
     }
 }

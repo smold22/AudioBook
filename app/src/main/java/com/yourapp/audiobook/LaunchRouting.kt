@@ -8,6 +8,7 @@ import android.content.res.Configuration
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -18,6 +19,7 @@ import com.yourapp.audiobook.player.PlaybackService
 import com.yourapp.audiobook.ui.AppNavHost
 import com.yourapp.audiobook.ui.FocusBorderIndication
 import com.yourapp.audiobook.ui.LocalUiMode
+import com.yourapp.audiobook.ui.UpdateDialogs
 import com.yourapp.audiobook.ui.theme.AudioBookTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -78,8 +80,10 @@ fun AppRoot(uiMode: String, onExitApp: () -> Unit) {
         SettingsStore.FONT_LARGE -> 1.2f
         else -> 1f
     }
+    val accentColor by settings.accentColor.collectAsStateWithLifecycle(initialValue = SettingsStore.ACCENT_DYNAMIC)
+    val customAccentHex by settings.customAccentColor.collectAsStateWithLifecycle(initialValue = null)
     // В горизонтальной ориентации используем ТВ-интерфейс (боковая навигация,
-    // обводка фокуса), как на Android TV.
+    // обводка фокуса), как на Android TV. В портретной — смартфон-интерфейс.
     val isTv = uiMode == SettingsStore.UI_MODE_TV ||
         LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val effectiveUiMode = if (isTv) SettingsStore.UI_MODE_TV else uiMode
@@ -87,8 +91,18 @@ fun AppRoot(uiMode: String, onExitApp: () -> Unit) {
         LocalUiMode provides effectiveUiMode,
         LocalIndication provides if (isTv) FocusBorderIndication() else LocalIndication.current,
     ) {
-        AudioBookTheme(darkTheme = darkTheme, fontScale = fontScale) {
+        AudioBookTheme(
+            darkTheme = darkTheme,
+            accentColor = accentColor,
+            customAccentHex = customAccentHex,
+            fontScale = fontScale,
+        ) {
+            val app = context.applicationContext as AudioBookApplication
+            LaunchedEffect(Unit) {
+                app.updateManager.checkForUpdates(auto = true)
+            }
             AppNavHost(onExitApp = onExitApp)
+            UpdateDialogs(app.updateManager)
         }
     }
 }
@@ -110,8 +124,14 @@ fun AudioBookApplication.resumeLastBookIfEnabled(scope: CoroutineScope, context:
         val savedTrack = progress?.trackIndex ?: 0
         val trackIndex = savedTrack.takeIf { it in details.tracks.indices } ?: 0
         val positionMs = if (trackIndex == savedTrack) progress?.positionMs ?: 0L else 0L
-        val localUris = if (downloadManager.isDownloaded(bookKey)) {
-            downloadManager.offlineTrackUris(bookKey, details.tracks.size)
+        val localUris = if (
+            downloadManager.isDownloaded(bookKey) ||
+            downloadManager.hasPartialTracks(bookKey)
+        ) {
+            val trackNames = details.tracks.mapIndexed { i, track ->
+                com.yourapp.audiobook.download.DownloadService.trackFileName(i, track)
+            }
+            downloadManager.offlineTrackUris(bookKey, trackNames)
         } else {
             null
         }

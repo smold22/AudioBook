@@ -1,8 +1,5 @@
 package com.yourapp.audiobook.ui
 
-import android.app.Activity
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,16 +13,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.material.icons.outlined.WatchLater
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -41,7 +39,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
-import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.yourapp.audiobook.AudioBookApplication
 import com.yourapp.audiobook.data.sync.BackupInfo
 import java.text.SimpleDateFormat
@@ -50,7 +47,11 @@ import java.util.Locale
 
 @Composable
 fun ProfileScreen(navController: NavHostController) {
-    Column(Modifier.fillMaxSize()) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+    ) {
         Text(
             "Я",
             style = MaterialTheme.typography.titleLarge,
@@ -65,10 +66,10 @@ fun ProfileScreen(navController: NavHostController) {
         )
         HorizontalDivider()
         ProfileRow(
-            title = "Загрузки",
-            subtitle = "Скачанные книги",
-            icon = { Icon(Icons.Filled.Download, contentDescription = null) },
-            onClick = { navController.navigate("downloads") },
+            title = "Буду слушать",
+            subtitle = "Отложенные книги",
+            icon = { Icon(Icons.Outlined.WatchLater, contentDescription = null) },
+            onClick = { navController.navigate("watchlist") },
         )
         HorizontalDivider()
         ProfileRow(
@@ -87,23 +88,7 @@ private fun GoogleSyncSection() {
     val context = LocalContext.current
     val app = context.applicationContext as AudioBookApplication
     val syncState by app.syncManager.state.collectAsStateWithLifecycle()
-    val signInClient = remember {
-        runCatching { app.syncManager.buildSignInClient() }.getOrNull()
-    }
-    val signInLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val data = result.data ?: return@rememberLauncherForActivityResult
-            runCatching {
-                GoogleSignIn.getSignedInAccountFromIntent(data).getResult()
-            }.onSuccess { account ->
-                app.syncManager.onSignInOK(account)
-            }.onFailure {
-                app.syncManager.onSignInError(it)
-            }
-        }
-    }
+    val googleSignIn = rememberGoogleSignInController()
     val lastSyncLabel = remember(syncState.lastSyncAtMs) {
         syncState.lastSyncAtMs?.let { ts ->
             val format = SimpleDateFormat("dd.MM HH:mm", Locale.getDefault())
@@ -122,10 +107,10 @@ private fun GoogleSyncSection() {
             Text("Синхронизация с Google", style = MaterialTheme.typography.bodyLarge)
             Text(
                 when {
-                    signInClient == null -> "Google Play Services не обнаружены на устройстве"
+                    !googleSignIn.available -> "Google Play Services не обнаружены на устройстве"
                     syncState.syncing -> "Синхронизирую..."
                     syncState.signedIn -> lastSyncLabel ?: "Синхронизация ещё не выполнялась"
-                    else -> "Избранное, история, прогресс, закладки и настройки через Cloud Firestore"
+                    else -> "Избранное, «Буду слушать», история, прогресс, закладки и настройки через Cloud Firestore"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -149,10 +134,8 @@ private fun GoogleSyncSection() {
     ) {
         if (!syncState.signedIn) {
             OutlinedButton(
-                enabled = signInClient != null && !syncState.syncing,
-                onClick = {
-                    signInClient?.signInIntent?.let { signInLauncher.launch(it) }
-                },
+                enabled = googleSignIn.available && !syncState.syncing,
+                onClick = googleSignIn.onSignInClick,
             ) {
                 Text("Войти в Google")
             }
@@ -203,6 +186,8 @@ private fun GoogleSyncSection() {
                 showBackupsDialog = false
                 confirmRestore = backup
             },
+            onDeleteBackup = { app.syncManager.deleteBackup(it.id) },
+            onClearAll = { app.syncManager.clearBackups() },
         )
     }
     confirmRestore?.let { backup ->
@@ -222,10 +207,13 @@ private fun GoogleSyncSection() {
 private fun BackupsDialog(
     onDismiss: () -> Unit,
     onRestore: (BackupInfo) -> Unit,
+    onDeleteBackup: (BackupInfo) -> Unit,
+    onClearAll: () -> Unit,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as AudioBookApplication
     val backups by app.syncManager.backups.collectAsStateWithLifecycle()
+    var confirmClearAll by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Восстановить из бэкапа") },
@@ -244,13 +232,24 @@ private fun BackupsDialog(
                                 .fillMaxWidth()
                                 .clickable { onRestore(backup) }
                                 .tvFocus()
-                                .padding(vertical = 10.dp),
+                                .padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
                                 formatBackupTime(backup.createdAtMs),
                                 style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier.weight(1f).padding(vertical = 6.dp),
                             )
+                            IconButton(
+                                onClick = { onDeleteBackup(backup) },
+                                modifier = Modifier.tvFocus(),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Delete,
+                                    contentDescription = "Удалить бэкап",
+                                    tint = MaterialTheme.colorScheme.error,
+                                )
+                            }
                         }
                         HorizontalDivider()
                     }
@@ -262,6 +261,15 @@ private fun BackupsDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                if (backups.isNotEmpty()) {
+                    Spacer(Modifier.heightIn(min = 8.dp))
+                    TextButton(
+                        onClick = { confirmClearAll = true },
+                        modifier = Modifier.tvFocus(),
+                    ) {
+                        Text("Очистить все бэкапы", color = MaterialTheme.colorScheme.error)
+                    }
+                }
             }
         },
         confirmButton = {
@@ -270,6 +278,32 @@ private fun BackupsDialog(
             }
         },
     )
+    if (confirmClearAll) {
+        AlertDialog(
+            onDismissRequest = { confirmClearAll = false },
+            title = { Text("Очистить все бэкапы?") },
+            text = {
+                Text(
+                    "Будут удалены все резервные копии из облака. Восстановление станет невозможным.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmClearAll = false
+                        onClearAll()
+                    },
+                ) {
+                    Text("Очистить", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClearAll = false }) {
+                    Text("Отмена")
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -329,10 +363,5 @@ private fun ProfileRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }

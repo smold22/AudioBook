@@ -1,6 +1,10 @@
 package com.yourapp.audiobook.data.sync
 
+import android.accounts.AccountManager
 import android.content.Context
+import android.content.Intent
+import com.google.android.gms.auth.GoogleAuthUtil
+import com.google.android.gms.auth.UserRecoverableAuthException
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
@@ -18,6 +22,7 @@ import com.yourapp.audiobook.data.FavoritesStore
 import com.yourapp.audiobook.data.HistoryStore
 import com.yourapp.audiobook.data.ProgressStore
 import com.yourapp.audiobook.data.SettingsStore
+import com.yourapp.audiobook.data.WatchlistStore
 import java.util.concurrent.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +52,7 @@ data class SyncState(
 class SyncManager(
     private val context: Context,
     private val favoritesStore: FavoritesStore,
+    private val watchlistStore: WatchlistStore,
     private val historyStore: HistoryStore,
     private val progressStore: ProgressStore,
     private val bookmarksStore: BookmarksStore,
@@ -66,6 +72,9 @@ class SyncManager(
     private val _backups = MutableStateFlow<List<BackupInfo>>(emptyList())
     val backups: StateFlow<List<BackupInfo>> = _backups.asStateFlow()
 
+    private val _pendingAuth = MutableStateFlow<Intent?>(null)
+    val pendingAuth: StateFlow<Intent?> = _pendingAuth.asStateFlow()
+
     private var started = false
     private var reSyncQueued = false
 
@@ -80,14 +89,7 @@ class SyncManager(
     }
 
     fun buildSignInClient(): GoogleSignInClient? {
-        val clientId = runCatching {
-            val resId = context.resources.getIdentifier(
-                "default_web_client_id",
-                "string",
-                context.packageName,
-            )
-            if (resId != 0) context.getString(resId) else null
-        }.getOrNull()
+        val clientId = webClientId()
         return runCatching {
             val builder = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
                 .requestScopes(Scope(DRIVE_FILE_SCOPE))
@@ -96,6 +98,83 @@ class SyncManager(
             GoogleSignIn.getClient(context, builder.build())
         }.getOrNull()
     }
+
+    fun consumePendingAuth() {
+        _pendingAuth.value = null
+    }
+
+    /**
+     * Вход через Google на Android TV: диалог выбора аккаунта (GoogleSignIn)
+     * на ТВ не поддерживается, поэтому используется аккаунт Google из настроек
+     * устройства (AccountManager) и OAuth-токен через GoogleAuthUtil.
+     */
+    fun signInWithTvAccount() {
+        if (_state.value.syncing || _state.value.restoring) return
+        if (currentUser() != null) {
+            syncNow()
+            return
+        }
+        scope.launch {
+            runCatching { signInWithTvToken() }
+                .onSuccess { email ->
+                    _state.update { s ->
+                        s.copy(
+                            signedIn = true,
+                            accountEmail = email ?: s.accountEmail,
+                            lastError = null,
+                        )
+                    }
+                    doSync()
+                }
+                .onFailure { e ->
+                    if (e is UserRecoverableAuthException) {
+                        _pendingAuth.value = e.intent
+                        _state.update {
+                            it.copy(lastError = "Требуется подтверждение доступа в окне Google")
+                        }
+                    } else {
+                        _state.update { s -> s.copy(lastError = "Ошибка входа: ${e.message}") }
+                    }
+                }
+        }
+    }
+
+    private suspend fun signInWithTvToken(): String? = withContext(Dispatchers.IO) {
+        val am = AccountManager.get(context)
+        val clientId = webClientId()
+            ?: throw IllegalStateException("Не найден web-клиент (oauth_client) в google-services.json")
+        var accounts = am.getAccountsByType(GoogleAuthUtil.GOOGLE_ACCOUNT_TYPE)
+        if (accounts.isEmpty()) {
+            // На Android 15+ аккаунты скрыты, пока приложение не получило доступ:
+            // запрашиваем его через GMS (может потребовать подтверждение пользователя).
+            GoogleAuthUtil.requestGoogleAccountsAccess(context)
+            accounts = am.getAccountsByType(GoogleAuthUtil.GOOGLE_ACCOUNT_TYPE)
+        }
+        val account = accounts.firstOrNull()
+            ?: throw IllegalStateException("Аккаунт Google не найден на устройстве")
+        val token = GoogleAuthUtil.getToken(
+            context,
+            account,
+            "audience:server:client_id:$clientId",
+        )
+        try {
+            firebaseAuth
+                .signInWithCredential(GoogleAuthProvider.getCredential(token, null))
+                .awaitTask()
+        } finally {
+            runCatching { GoogleAuthUtil.invalidateToken(context, token) }
+        }
+        account.name
+    }
+
+    private fun webClientId(): String? = runCatching {
+        val resId = context.resources.getIdentifier(
+            "default_web_client_id",
+            "string",
+            context.packageName,
+        )
+        if (resId != 0) context.getString(resId) else null
+    }.getOrNull()
 
     fun onSignInOK(account: GoogleSignInAccount) {
         val idToken = account.idToken
@@ -166,6 +245,32 @@ class SyncManager(
     fun restoreBackup(backupId: String) {
         if (_state.value.syncing || _state.value.restoring) return
         scope.launch { doRestore(backupId) }
+    }
+
+    /** Удаляет одну резервную копию из облака. */
+    fun deleteBackup(backupId: String) {
+        currentUser()?.let { user ->
+            scope.launch {
+                runCatching { store.deleteBackup(user.uid, backupId) }
+                    .onSuccess { _backups.value = store.listBackups(user.uid) }
+                    .onFailure { e ->
+                        _state.update { s -> s.copy(lastError = "Ошибка удаления бэкапа: ${e.message}") }
+                    }
+            }
+        }
+    }
+
+    /** Удаляет все резервные копии пользователя из облака. */
+    fun clearBackups() {
+        currentUser()?.let { user ->
+            scope.launch {
+                runCatching { store.clearBackups(user.uid) }
+                    .onSuccess { _backups.value = emptyList() }
+                    .onFailure { e ->
+                        _state.update { s -> s.copy(lastError = "Ошибка очистки бэкапов: ${e.message}") }
+                    }
+            }
+        }
     }
 
     private suspend fun refreshBackups(uid: String) {
@@ -247,6 +352,7 @@ class SyncManager(
         SyncData(
             updatedAtMs = syncStateStore.lastChangeMs(),
             favorites = favoritesStore.snapshot(),
+            watchlist = watchlistStore.snapshot(),
             history = historyStore.snapshot(),
             progress = progressStore.snapshot(),
             bookmarks = bookmarksStore.snapshot(),
@@ -256,12 +362,14 @@ class SyncManager(
 
     private fun hasLocalData(data: SyncData): Boolean =
         data.favorites.isNotEmpty() ||
+            data.watchlist.isNotEmpty() ||
             data.history.isNotEmpty() ||
             data.progress.isNotEmpty() ||
             data.bookmarks.isNotEmpty()
 
     private suspend fun applyLocal(data: SyncData) {
         favoritesStore.restore(data.favorites)
+        watchlistStore.restore(data.watchlist)
         historyStore.restore(data.history.take(MAX_HISTORY_ENTRIES))
         progressStore.restore(data.progress)
         bookmarksStore.restore(data.bookmarks)

@@ -23,8 +23,8 @@ android {
         applicationId = "com.yourapp.audiobook"
         minSdk = 24
         targetSdk = 37
-        versionCode = 2
-        versionName = "1.3.0"
+        versionCode = 4
+        versionName = "1.4.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

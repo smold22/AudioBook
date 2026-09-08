@@ -22,8 +22,9 @@ class Lis10BookCheckTest {
         val search = s.search("космос", 1)
         println("поиск: ${search.size} -> ${search.firstOrNull()?.title}")
         println("счётчик: ${s.genreBookCount("https://lis10book.com/genres/eve-online/")}")
-        if (d.book.seriesUrl != null) {
-            val series = s.seriesBooks(d.book.seriesUrl, 1)
+        val seriesUrl = d.book.seriesUrl
+        if (seriesUrl != null) {
+            val series = s.seriesBooks(seriesUrl, 1)
             println("серия ${d.book.seriesTitle} (#${d.book.seriesIndex}): ${series.size}")
         }
     }

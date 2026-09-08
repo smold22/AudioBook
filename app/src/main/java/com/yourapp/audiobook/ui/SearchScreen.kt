@@ -1,20 +1,27 @@
 package com.yourapp.audiobook.ui
 
 import android.net.Uri
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -59,6 +66,10 @@ fun SearchScreen(navController: NavHostController) {
     var query by remember { mutableStateOf("") }
     var selectedSourceId by remember { mutableStateOf<String?>(null) }
     var sourceMenuExpanded by remember { mutableStateOf(false) }
+    var exactSearch by remember { mutableStateOf(false) }
+    var searchByTitle by remember { mutableStateOf(true) }
+    var searchByAuthor by remember { mutableStateOf(true) }
+    var searchByReader by remember { mutableStateOf(true) }
 
     val shouldLoadMore by remember {
         derivedStateOf {
@@ -68,7 +79,7 @@ fun SearchScreen(navController: NavHostController) {
                 SettingsStore.VIEW_GRID -> (state.books.size + 1) / 2
                 else -> state.books.size
             }
-            displayCount >= 5 && lastVisible >= (displayCount - 3)
+            displayCount >= 5 && lastVisible >= (displayCount / 4)
         }
     }
     LaunchedEffect(shouldLoadMore, state.books.size) {
@@ -80,6 +91,15 @@ fun SearchScreen(navController: NavHostController) {
     }
 
     Column(Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = { navController.popBackStack() }) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+            }
+            Text("Поиск", style = MaterialTheme.typography.titleLarge)
+        }
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -144,6 +164,59 @@ fun SearchScreen(navController: NavHostController) {
                     )
                 }
             }
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 2.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = searchByTitle,
+                    onCheckedChange = { searchByTitle = it },
+                )
+                Text("По названию", style = MaterialTheme.typography.bodyLarge)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = searchByAuthor,
+                    onCheckedChange = { searchByAuthor = it },
+                )
+                Text("По автору", style = MaterialTheme.typography.bodyLarge)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = searchByReader,
+                    onCheckedChange = { searchByReader = it },
+                )
+                Text("По чтецу", style = MaterialTheme.typography.bodyLarge)
+            }
+        }
+        LaunchedEffect(searchByTitle, searchByAuthor, searchByReader) {
+            viewModel.setSearchFields(searchByTitle, searchByAuthor, searchByReader)
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { exactSearch = !exactSearch }
+                .padding(horizontal = 16.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(
+                checked = exactSearch,
+                onCheckedChange = { exactSearch = it },
+            )
+            Column {
+                Text("Точный поиск", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Искать целое слово или словосочетание",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        LaunchedEffect(exactSearch) {
+            viewModel.setExactSearch(exactSearch)
         }
 
         if (state.books.isEmpty() && !state.loading && state.error == null) {

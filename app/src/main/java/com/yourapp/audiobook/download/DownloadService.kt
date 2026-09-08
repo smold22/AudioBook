@@ -6,7 +6,6 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Environment
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -32,18 +31,22 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.OutputStream
+import java.net.Proxy
 import java.util.concurrent.TimeUnit
 
 class DownloadService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var currentBookKey: String? = null
+    private var currentTrackIndex: Int? = null
     private var pendingBookKey: String? = null
 
     /** Нейтральный клиент без Referer: CDN разных источников могут блокировать чужие referer. */
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        // Игнорируем системный HTTP-прокси (см. buildClient в source-extra).
+        .proxy(Proxy.NO_PROXY)
         .addInterceptor { chain ->
             chain.proceed(
                 chain.request().newBuilder()
@@ -72,6 +75,7 @@ class DownloadService : Service() {
                     pendingBookKey = bookKey
                     return START_STICKY
                 }
+                currentTrackIndex = intent.getIntExtra(EXTRA_TRACK_INDEX, -1).takeIf { it >= 0 }
                 startDownload(bookKey)
             }
             ACTION_CANCEL -> {
@@ -106,6 +110,7 @@ class DownloadService : Service() {
     override fun onDestroy() {
         serviceScope.cancel()
         currentBookKey = null
+        currentTrackIndex = null
         torrentManager.cancelAll()
         super.onDestroy()
     }
@@ -128,6 +133,12 @@ class DownloadService : Service() {
             val storage = DownloadStorage(this, folderUri, bookTitle)
             val tracks = details.tracks
             if (tracks.isEmpty()) throw IOException("В книге нет доступных аудиофайлов")
+
+            val trackIndex = currentTrackIndex
+            if (trackIndex != null) {
+                runSingleTrackDownload(bookKey, details, bookTitle, folderUri, trackIndex)
+                return
+            }
 
             val total = tracks.size
             var done = 0
@@ -203,6 +214,7 @@ class DownloadService : Service() {
             }
         } finally {
             currentBookKey = null
+            currentTrackIndex = null
             val next = pendingBookKey
             pendingBookKey = null
             if (next != null) {
@@ -211,6 +223,42 @@ class DownloadService : Service() {
                 stopSelf()
             }
         }
+    }
+
+    /** Скачивание одного трека книги в её папку (без пометки книги полностью скачанной). */
+    private suspend fun runSingleTrackDownload(
+        bookKey: String,
+        details: com.yourapp.audiobook.source.api.BookDetails,
+        bookTitle: String,
+        folderUri: Uri?,
+        trackIndex: Int,
+    ) {
+        if (trackIndex !in details.tracks.indices) throw IOException("Трек недоступен")
+        val track = details.tracks[trackIndex]
+        val storage = DownloadStorage(this, folderUri, bookTitle)
+        updateNotification(
+            title = "Скачивание трека",
+            text = "$bookTitle · ${track.title}",
+            percent = null,
+            indeterminate = true,
+            ongoing = true,
+        )
+        downloadTrackFile(httpClient, storage, trackIndex, track) { percent ->
+            manager.setState(
+                bookKey,
+                DownloadState(bookKey, DownloadStatus.DOWNLOADING, percent = percent, tracksDone = 1, tracksTotal = 1),
+            )
+            updateNotification(
+                title = "Скачивание трека",
+                text = "${track.title} · $percent%",
+                percent = percent,
+                indeterminate = false,
+                ongoing = true,
+            )
+        }
+        manager.finishTrackDownload(bookKey, trackFileName(trackIndex, track), OfflineMeta.encode(details))
+        updateNotification("Трек скачан", track.title, percent = 100, indeterminate = false, ongoing = false)
+        stopForeground(STOP_FOREGROUND_DETACH)
     }
 
     private suspend fun downloadTrackFile(
@@ -302,7 +350,7 @@ class DownloadService : Service() {
         val torrentBytes = withContext(Dispatchers.IO) {
             source.fetchTorrentBytes(torrentUrl)
         } ?: throw IOException("Не удалось загрузить торрент-файл")
-        val torrentsRoot = File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), ".torrents")
+        val torrentsRoot = File(appDownloadsRoot(), ".torrents")
         val tempDir = File(torrentsRoot, "${bookKey.hashCode()}_${sanitize(bookTitle)}")
         tempDir.deleteRecursively()
         if (!tempDir.mkdirs()) throw IOException("Не удалось создать временную папку")
@@ -342,7 +390,7 @@ class DownloadService : Service() {
         val files = withContext(Dispatchers.IO) { normalizeTorrentFiles(tempDir) }
         val dirName = sanitize(bookTitle)
         if (folderUri == null) {
-            val finalDir = File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), dirName)
+            val finalDir = File(appDownloadsRoot(), dirName)
             finalDir.deleteRecursively()
             if (!finalDir.mkdirs()) throw IOException("Не удалось создать папку книги")
             files.forEach { (name, file) ->
@@ -482,7 +530,7 @@ class DownloadService : Service() {
     ) {
         private val bookDirName = sanitize(bookTitle)
         private val bookFile: File? =
-            if (folderUri == null) File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), bookDirName) else null
+            if (folderUri == null) File(context.appDownloadsRoot(), bookDirName) else null
         private val bookDoc: DocumentFile? = if (folderUri == null) null else {
             val root = DocumentFile.fromTreeUri(context, folderUri)
             if (root == null || !root.canWrite()) {
@@ -569,13 +617,14 @@ class DownloadService : Service() {
         }
 
         private fun fileName(index: Int, track: AudioTrack): String =
-            "%02d - %s.mp3".format(index + 1, sanitize(track.title))
+            trackFileName(index, track)
     }
 
     companion object {
         const val ACTION_DOWNLOAD = "com.yourapp.audiobook.action.DOWNLOAD"
         const val ACTION_CANCEL = "com.yourapp.audiobook.action.CANCEL"
         const val EXTRA_BOOK_KEY = "bookKey"
+        const val EXTRA_TRACK_INDEX = "trackIndex"
 
         private val FORBIDDEN = Regex("""[\\/:*?"<>|\r\n\t]""")
 
@@ -587,5 +636,9 @@ class DownloadService : Service() {
             val cleaned = name.replace(FORBIDDEN, " ").replace(Regex("""\s+"""), " ").trim()
             return if (cleaned.isEmpty()) "book" else cleaned.take(80)
         }
+
+        /** Имя файла трека в папке книги, например "01 - Глава.mp3". */
+        fun trackFileName(index: Int, track: AudioTrack): String =
+            "%02d - %s.mp3".format(index + 1, sanitize(track.title))
     }
 }

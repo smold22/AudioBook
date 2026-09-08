@@ -10,9 +10,10 @@ import com.yourapp.audiobook.source.api.Book
  * используется для выбора актуальной копии при слиянии (last-write-wins).
  */
 data class SyncData(
-    val version: Int = 2,
+    val version: Int = 3,
     val updatedAtMs: Long = 0L,
     val favorites: List<Book> = emptyList(),
+    val watchlist: List<Book> = emptyList(),
     val history: List<HistoryEntry> = emptyList(),
     val progress: Map<String, String> = emptyMap(),
     val bookmarks: Map<String, List<Bookmark>> = emptyMap(),
@@ -32,6 +33,9 @@ data class SyncData(
         val remoteFavoriteKeys = remote.favorites.map { it.bookKey }.toSet()
         val mergedFavorites = remote.favorites +
             local.favorites.filterNot { it.bookKey in remoteFavoriteKeys }
+        val remoteWatchlistKeys = remote.watchlist.map { it.bookKey }.toSet()
+        val mergedWatchlist = remote.watchlist +
+            local.watchlist.filterNot { it.bookKey in remoteWatchlistKeys }
         val mergedHistory = (remote.history + local.history)
             .distinctBy { it.book.bookKey }
             .sortedByDescending { it.playedAtMs }
@@ -46,6 +50,7 @@ data class SyncData(
             version = maxOf(remote.version, local.version),
             updatedAtMs = maxOf(remote.updatedAtMs, local.updatedAtMs),
             favorites = mergedFavorites,
+            watchlist = mergedWatchlist,
             history = mergedHistory,
             progress = mergedProgress,
             bookmarks = mergedBookmarks,

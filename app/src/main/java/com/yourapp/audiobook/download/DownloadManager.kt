@@ -22,6 +22,10 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
+/** Папка по умолчанию для скачанных книг: .../files/AudioBook */
+fun Context.appDownloadsRoot(): File =
+    getExternalFilesDir("AudioBook") ?: File(filesDir, "AudioBook")
+
 enum class DownloadStatus { DOWNLOADING, COMPLETE, ERROR }
 
 data class DownloadState(
@@ -50,6 +54,9 @@ class DownloadManager(
     private val _downloadedKeys = MutableStateFlow<Set<String>>(emptySet())
     val downloadedKeys: StateFlow<Set<String>> = _downloadedKeys.asStateFlow()
 
+    private val _downloadedTracks = MutableStateFlow<Map<String, Set<String>>>(emptyMap())
+    val downloadedTracks: StateFlow<Map<String, Set<String>>> = _downloadedTracks.asStateFlow()
+
     private val cancelling = ConcurrentHashMap.newKeySet<String>()
 
     init {
@@ -63,10 +70,31 @@ class DownloadManager(
                 ?.createNotificationChannel(channel)
         }
         scope.launch {
+            migrateDownloadRoot()
             val books = settingsStore.downloadedBooks()
             _downloadedBooks.update { it + books }
             _downloadedKeys.update { it + books.keys }
+            _downloadedTracks.update { settingsStore.downloadedTrackNames() }
             migrateLegacyDownloads()
+        }
+    }
+
+    /** Переносит ранее скачанные книги из files/Download в files/AudioBook. */
+    private fun migrateDownloadRoot() {
+        val oldRoot = appContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return
+        val newRoot = appContext.appDownloadsRoot()
+        if (oldRoot.absolutePath == newRoot.absolutePath) return
+        if (!oldRoot.isDirectory) return
+        newRoot.mkdirs()
+        oldRoot.listFiles { f -> f.isDirectory }?.forEach { dir ->
+            if (dir.name == ".torrents" || hasMp3Files(dir)) {
+                val target = File(newRoot, dir.name)
+                if (target.exists()) return@forEach
+                if (!dir.renameTo(target)) {
+                    runCatching { dir.copyRecursively(target) }
+                    dir.deleteRecursively()
+                }
+            }
         }
     }
 
@@ -93,7 +121,7 @@ class DownloadManager(
     }
 
     private suspend fun findBookFolder(dirName: String): String? {
-        val appDir = File(appContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), dirName)
+        val appDir = File(appContext.appDownloadsRoot(), dirName)
         if (hasMp3Files(appDir)) return APP_FOLDER
         val tree = settingsStore.currentDownloadFolder() ?: return null
         val root = DocumentFile.fromTreeUri(appContext, Uri.parse(tree)) ?: return null
@@ -127,6 +155,28 @@ class DownloadManager(
         }
     }
 
+    /** Скачивание одного трека книги. */
+    fun startDownloadTrack(context: Context, bookKey: String, trackIndex: Int) {
+        if (_states.value.values.any { it.status == DownloadStatus.DOWNLOADING }) return
+        if (isDownloaded(bookKey)) return
+        cancelling.remove(bookKey)
+        _states.update {
+            it + (bookKey to DownloadState(bookKey, DownloadStatus.DOWNLOADING, tracksTotal = 1))
+        }
+        try {
+            context.startForegroundService(
+                Intent(context, DownloadService::class.java)
+                    .setAction(DownloadService.ACTION_DOWNLOAD)
+                    .putExtra(DownloadService.EXTRA_BOOK_KEY, bookKey)
+                    .putExtra(DownloadService.EXTRA_TRACK_INDEX, trackIndex),
+            )
+        } catch (e: Exception) {
+            _states.update {
+                it + (bookKey to DownloadState(bookKey, DownloadStatus.ERROR, errorMessage = "Не удалось запустить скачивание"))
+            }
+        }
+    }
+
     fun cancel(bookKey: String) {
         if (_states.value[bookKey]?.status != DownloadStatus.DOWNLOADING) return
         cancelling.add(bookKey)
@@ -152,25 +202,41 @@ class DownloadManager(
         _states.update { it + (bookKey to DownloadState(bookKey, DownloadStatus.COMPLETE)) }
     }
 
+    /** Завершение скачивания одного трека: книга не помечается полностью скачанной. */
+    suspend fun finishTrackDownload(bookKey: String, fileName: String, metaJson: String) {
+        cancelling.remove(bookKey)
+        if (settingsStore.bookMeta(bookKey) == null) {
+            runCatching { settingsStore.saveBookMeta(bookKey, metaJson) }
+        }
+        val updated = _downloadedTracks.value[bookKey].orEmpty() + fileName
+        runCatching { settingsStore.saveDownloadedTracks(bookKey, updated) }
+        _downloadedTracks.update { it + (bookKey to updated) }
+        _states.update { it + (bookKey to DownloadState(bookKey, DownloadStatus.COMPLETE)) }
+    }
+
+    fun isTrackDownloaded(bookKey: String, fileName: String): Boolean =
+        fileName in _downloadedTracks.value[bookKey].orEmpty()
+
+    fun hasPartialTracks(bookKey: String): Boolean =
+        _downloadedTracks.value[bookKey].orEmpty().isNotEmpty()
+
     fun cancelFinished(bookKey: String) {
         cancelling.remove(bookKey)
         _states.update { it - bookKey }
     }
 
     suspend fun offlineDetails(bookKey: String): BookDetails? {
-        if (!isDownloaded(bookKey)) return null
         val meta = settingsStore.bookMeta(bookKey) ?: return null
         return OfflineMeta.decode(meta)
     }
 
     suspend fun deleteDownloadedBook(bookKey: String): Boolean {
-        val folderRef = _downloadedBooks.value[bookKey] ?: return false
+        val folderRef = _downloadedBooks.value[bookKey]
         val dirName = offlineDetails(bookKey)?.book?.title?.let(DownloadService::sanitize)
         if (dirName != null) {
             withContext(Dispatchers.IO) {
-                if (folderRef == APP_FOLDER) {
-                    val dir = File(appContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), dirName)
-                    dir.deleteRecursively()
+                if (folderRef == APP_FOLDER || folderRef == null) {
+                    File(appContext.appDownloadsRoot(), dirName).deleteRecursively()
                 } else {
                     DocumentFile.fromTreeUri(appContext, Uri.parse(folderRef))
                         ?.findFile(dirName)
@@ -181,35 +247,41 @@ class DownloadManager(
         runCatching { settingsStore.removeDownloadedBook(bookKey) }
         _downloadedBooks.update { it - bookKey }
         _downloadedKeys.update { it - bookKey }
+        _downloadedTracks.update { it - bookKey }
         _states.update { it - bookKey }
         return true
     }
 
-    suspend fun offlineTrackUris(bookKey: String, trackCount: Int): List<Uri>? {
-        val folderRef = _downloadedBooks.value[bookKey] ?: return null
+suspend fun offlineTrackUris(bookKey: String, trackNames: List<String>): List<Uri?>? {
+        val folderRef = _downloadedBooks.value[bookKey]
+        val downloaded = _downloadedTracks.value[bookKey].orEmpty()
+        if (folderRef == null && downloaded.isEmpty()) return null
         val details = offlineDetails(bookKey) ?: return null
         val dirName = DownloadService.sanitize(details.book.title)
-        val files: List<Pair<String, Uri>>? = if (folderRef == APP_FOLDER) {
-            val dir = File(appContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), dirName)
-            if (!dir.isDirectory) return null
-            dir.listFiles { file -> file.isFile && file.name.endsWith(".mp3") }
-                ?.map { it.name to Uri.fromFile(it) }
-        } else {
-            val root = DocumentFile.fromTreeUri(appContext, Uri.parse(folderRef))
-            if (root == null || !root.isDirectory) return null
-            root.findFile(dirName)
-                ?.listFiles()
-                ?.filter { it.isFile && it.name?.endsWith(".mp3") == true }
-                ?.map { it.name.orEmpty() to it.uri }
+        val files: Map<String, Uri> = when {
+            folderRef == APP_FOLDER -> {
+                val dir = File(appContext.appDownloadsRoot(), dirName)
+                dir.listFiles { file -> file.isFile && file.name.endsWith(".mp3") }
+                    ?.associate { it.name to Uri.fromFile(it) } ?: emptyMap()
+            }
+            folderRef != null -> {
+                val root = DocumentFile.fromTreeUri(appContext, Uri.parse(folderRef))
+                root?.findFile(dirName)?.listFiles()
+                    ?.filter { it.isFile && it.name?.endsWith(".mp3") == true }
+                    ?.mapNotNull { file -> file.name?.let { name -> name to file.uri } }
+                    ?.toMap() ?: emptyMap()
+            }
+            else -> {
+                val dir = File(appContext.appDownloadsRoot(), dirName)
+                dir.listFiles { file -> file.isFile && file.name.endsWith(".mp3") }
+                    ?.associate { it.name to Uri.fromFile(it) } ?: emptyMap()
+            }
         }
-        if (files == null || files.isEmpty()) return null
-        val sorted = files.sortedBy { fileIndex(it.first) }.map { it.second }
-        return sorted.takeIf { trackCount > 0 && it.size == trackCount }
+        if (files.isEmpty()) return null
+        val uris = trackNames.map { files[it] }
+        if (folderRef != null && uris.any { it == null }) return null
+        return uris
     }
-
-    /** Индекс трека из имени файла вида "01 - Глава.mp3". */
-    private fun fileIndex(name: String): Int =
-        name.substringBefore(" -").trim().toIntOrNull() ?: Int.MAX_VALUE
 
     companion object {
         const val CHANNEL_ID = "downloads"
