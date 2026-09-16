@@ -45,7 +45,14 @@ data class SyncData(
             val remoteIds = remoteList.map { it.id }.toSet()
             remoteList + local.bookmarks[key].orEmpty().filterNot { it.id in remoteIds }
         }
-        val mergedSettings = remote.settings + local.settings.filterKeys { it !in remote.settings }
+        // Настройки: при конфликте ключа побеждает сторона, менявшаяся позже;
+        // при равных/неизвестных метках времени — локальная (активное устройство),
+        // чтобы облачная копия не затирала свежие локальные настройки (жанры, источники).
+        val mergedSettings = if (remote.updatedAtMs > local.updatedAtMs) {
+            remote.settings + local.settings.filterKeys { it !in remote.settings }
+        } else {
+            local.settings + remote.settings.filterKeys { it !in local.settings }
+        }
         return SyncData(
             version = maxOf(remote.version, local.version),
             updatedAtMs = maxOf(remote.updatedAtMs, local.updatedAtMs),

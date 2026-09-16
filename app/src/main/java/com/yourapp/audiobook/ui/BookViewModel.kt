@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class BookScreenState(
     val book: Book? = null,
@@ -27,8 +28,9 @@ data class BookScreenState(
     val error: String? = null,
     val progress: TrackPosition? = null,
     val currentTrackIndex: Int? = null,
-    val related: List<Book> = emptyList(),
     val seriesBooks: List<Book> = emptyList(),
+    val similarBooks: List<Book> = emptyList(),
+    val similarLoading: Boolean = false,
 )
 
 class BookViewModel(app: Application, private val bookKey: String) : AndroidViewModel(app) {
@@ -86,10 +88,10 @@ class BookViewModel(app: Application, private val bookKey: String) : AndroidView
                         loading = false,
                         progress = progress,
                         currentTrackIndex = currentIndex,
-                        related = AuthorGender.filterFemale(offline.related, hideFemale),
                         seriesBooks = AuthorGender.filterFemale(offline.seriesBooks, hideFemale),
                     )
                 }
+                loadSimilar()
                 return@launch
             }
             try {
@@ -119,10 +121,6 @@ class BookViewModel(app: Application, private val bookKey: String) : AndroidView
                 )
                 val newDetails = details.copy(book = merged)
                 appContext.bookCache.put(merged)
-                val related = AuthorGender.filterFemale(
-                    newDetails.related.filterNot { it.url == merged.url },
-                    hideFemale,
-                ).onEach { appContext.bookCache.put(it) }
                 val seriesBooks = AuthorGender.filterFemale(
                     newDetails.seriesBooks.filterNot { it.url == merged.url }
                         .sortedWith(compareBy<Book> { it.seriesIndex == null }.thenBy { it.seriesIndex }),
@@ -138,10 +136,10 @@ class BookViewModel(app: Application, private val bookKey: String) : AndroidView
                         loading = false,
                         progress = progress,
                         currentTrackIndex = currentIndex,
-                        related = related,
                         seriesBooks = seriesBooks,
                     )
                 }
+                loadSimilar()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -157,16 +155,11 @@ class BookViewModel(app: Application, private val bookKey: String) : AndroidView
     fun playTrack(index: Int, startPositionMs: Long = 0L) {
         val details = _state.value.details ?: return
         viewModelScope.launch {
-            val trackNames = details.tracks.mapIndexed { i, track ->
-                com.yourapp.audiobook.download.DownloadService.trackFileName(i, track)
-            }
-            val localUris = if (
-                appContext.downloadManager.isDownloaded(bookKey) ||
-                appContext.downloadManager.hasPartialTracks(bookKey)
-            ) {
+            val trackNames = com.yourapp.audiobook.download.trackFileNames(details)
+            // Качаем локальные файлы напрямую из хранилища: offlineTrackUris сам
+            // вернёт null, если книги нет на устройстве (тогда пойдём по сети).
+            val localUris = withContext(kotlinx.coroutines.Dispatchers.IO) {
                 appContext.downloadManager.offlineTrackUris(bookKey, trackNames)
-            } else {
-                null
             }
             appContext.playerController.play(details, index, startPositionMs, localUris)
             ContextCompat.startForegroundService(
@@ -181,5 +174,28 @@ class BookViewModel(app: Application, private val bookKey: String) : AndroidView
         val tracks = _state.value.details?.tracks ?: return
         if (progress.trackIndex !in tracks.indices) return
         playTrack(progress.trackIndex, progress.positionMs)
+    }
+
+    /** Подбирает похожие книги из своих источников в фоне и кладёт в состояние. */
+    private fun loadSimilar() {
+        viewModelScope.launch {
+            _state.update { it.copy(similarLoading = true) }
+            try {
+                val cached = appContext.similarBooks.similar(
+                    bookKey,
+                    _state.value.details?.description,
+                )
+                if (cached.isNullOrEmpty()) return@launch
+                val hideFemale = appContext.settingsStore.hideFemaleAuthors.first()
+                _state.update {
+                    it.copy(
+                        similarBooks = AuthorGender.filterFemale(cached, hideFemale),
+                        similarLoading = false,
+                    )
+                }
+            } finally {
+                _state.update { it.copy(similarLoading = false) }
+            }
+        }
     }
 }

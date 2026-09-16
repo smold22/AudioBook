@@ -29,14 +29,17 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
+
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,7 +61,10 @@ import com.yourapp.audiobook.ui.components.BookSectionRow
 import com.yourapp.audiobook.ui.components.DownloadButton
 import com.yourapp.audiobook.ui.components.rememberDownloadStarter
 import com.yourapp.audiobook.ui.components.rememberTrackDownloadStarter
+import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.launch
+
+private const val MAX_DESCRIPTION_WORDS = 10
 
 class BookViewModelFactory(
     private val app: AudioBookApplication,
@@ -77,6 +83,7 @@ fun BookScreen(bookKey: String, navController: NavHostController) {
         factory = BookViewModelFactory(app, bookKey),
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val tvMode = isTvMode
     val scope = rememberCoroutineScope()
     val favoriteKeys by app.favoritesStore.favoriteKeys.collectAsStateWithLifecycle(initialValue = emptySet())
     val isFavorite = bookKey in favoriteKeys
@@ -88,39 +95,8 @@ fun BookScreen(bookKey: String, navController: NavHostController) {
     val startDownload = rememberDownloadStarter(app, bookKey)
     val startTrackDownload = rememberTrackDownloadStarter(app, bookKey)
 
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = { navController.popBackStack() }) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
-            }
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Книга", style = MaterialTheme.typography.titleLarge)
-                Spacer(Modifier.width(4.dp))
-                state.book?.let { book ->
-                    IconButton(onClick = { scope.launch { app.favoritesStore.toggle(book) } }) {
-                        Icon(
-                            imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                            contentDescription = "Избранное",
-                            tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    IconButton(onClick = { scope.launch { app.watchlistStore.toggle(book) } }) {
-                        Icon(
-                            imageVector = if (isInWatchlist) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                            contentDescription = "Буду слушать",
-                            tint = if (isInWatchlist) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    DownloadButton(app, bookKey)
-                }
-            }
-        }
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().hazeSource(screenHaze())) {
 
         when {
         state.error != null && state.details == null -> {
@@ -145,7 +121,7 @@ fun BookScreen(bookKey: String, navController: NavHostController) {
         else -> {
             val details = state.details!!
             LazyColumn(
-                contentPadding = PaddingValues(vertical = 8.dp),
+                contentPadding = PaddingValues(top = GlassHeaderHeight + 4.dp, bottom = GlassBottomClearance),
                 modifier = Modifier.fillMaxSize(),
             ) {
                 item { BookHeader(
@@ -158,13 +134,29 @@ fun BookScreen(bookKey: String, navController: NavHostController) {
                         navController.navigate("person/${Uri.encode(reader)}?mode=reader")
                     },
                 ) }
+                if (!tvMode) {
+                    item(key = "similar") {
+                        BookSectionRow(
+                            title = "Похожие книги",
+                            books = state.similarBooks.take(8),
+                            onBookClick = { book ->
+                                app.bookCache.put(book)
+                                navController.navigate("book/${Uri.encode("${book.sourceId}:${book.id}")}")
+                            },
+                            onShowAll = { navController.navigate("similar/${Uri.encode(bookKey)}") },
+                            showAllLabel = "Ещё",
+                            loading = state.similarLoading,
+                            emptyHint = "Не нашлось похожих книг",
+                        )
+                    }
+                }
                 val series = state.book?.seriesTitle
                 if (series != null && state.book?.seriesUrl != null) {
                     item(key = "seriesTitle") {
                         Text(
                             text = "Серия: $series",
                             style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
@@ -177,13 +169,6 @@ fun BookScreen(bookKey: String, navController: NavHostController) {
                                 .tvFocus()
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
                         )
-                    }
-                }
-                if (state.related.isNotEmpty()) {
-                    item(key = "related") {
-                        BookSectionRow(title = "Похожие книги", books = state.related) { book ->
-                            navController.navigate("book/${Uri.encode(app.bookCache.keyOf(book))}")
-                        }
                     }
                 }
                 if (details.tracks.isNotEmpty()) {
@@ -257,6 +242,7 @@ fun BookScreen(bookKey: String, navController: NavHostController) {
                     }
                 }
                 itemsIndexed(details.tracks, key = { index, track -> "${track.url}#$index" }) { index, track ->
+                    val downloadState = downloadStates[bookKey]
                     TrackRow(
                         track = track,
                         index = index,
@@ -264,6 +250,8 @@ fun BookScreen(bookKey: String, navController: NavHostController) {
                         onClick = { viewModel.playTrack(index) },
                         downloaded = bookKey in downloadedKeys ||
                             DownloadService.trackFileName(index, track) in downloadedTracks[bookKey].orEmpty(),
+                        downloading = downloadState?.status == DownloadStatus.DOWNLOADING &&
+                            downloadState.trackIndex == index,
                         downloadEnabled = downloadStates[bookKey]?.status != DownloadStatus.DOWNLOADING,
                         onDownload = { startTrackDownload(index) },
                     )
@@ -271,6 +259,38 @@ fun BookScreen(bookKey: String, navController: NavHostController) {
             }
         }
     }
+        }
+        GlassHeader(
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
+            IconButton(onClick = { navController.popBackStack() }) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+            }
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Книга", style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.width(4.dp))
+                state.book?.let { book ->
+                    IconButton(onClick = { scope.launch { app.favoritesStore.toggle(book) } }) {
+                        Icon(
+                            imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                            contentDescription = "Избранное",
+                            tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = { scope.launch { app.watchlistStore.toggle(book) } }) {
+                        Icon(
+                            imageVector = if (isInWatchlist) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                            contentDescription = "Буду слушать",
+                            tint = if (isInWatchlist) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    DownloadButton(app, bookKey)
+                }
+            }
+        }
     }
 }
 
@@ -283,14 +303,15 @@ private fun BookHeader(
 ) {
     val book = state.book
     val imageLoader = rememberAppImageLoader()
-    Column(Modifier.padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    var descriptionExpanded by rememberSaveable { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             AsyncImage(
                 model = book?.coverUrl,
                 contentDescription = book?.title,
                 imageLoader = imageLoader,
                 modifier = Modifier
-                    .size(140.dp)
+                    .size(width = 140.dp, height = 210.dp)
                     .clip(RoundedCornerShape(10.dp)),
                 contentScale = ContentScale.Crop,
             )
@@ -300,7 +321,7 @@ private fun BookHeader(
                     Text(
                         text = series + (book.seriesIndex?.let { " · Книга $it" } ?: ""),
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.tertiary,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -316,7 +337,7 @@ private fun BookHeader(
                     Text(
                         text = "Автор: $author",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.clickable { onAuthorClick(author) }.tvFocus(),
@@ -326,7 +347,7 @@ private fun BookHeader(
                     Text(
                         text = "Читает: $reader",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.clickable { onReaderClick(reader) }.tvFocus(),
@@ -339,14 +360,29 @@ private fun BookHeader(
         }
         state.details?.description?.let { description ->
             Spacer(Modifier.height(16.dp))
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            val words = description.split(Regex("\\s+")).filter { it.isNotBlank() }
+            val truncated = !isTvMode && words.size > MAX_DESCRIPTION_WORDS
+            val collapsed = truncated && !descriptionExpanded
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                Text(
+                    text = if (collapsed) words.take(MAX_DESCRIPTION_WORDS).joinToString(" ") + "…" else description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (truncated) {
+                    Text(
+                        text = if (descriptionExpanded) "Свернуть" else "Ещё",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .padding(top = 4.dp)
+                            .clickable { descriptionExpanded = !descriptionExpanded }
+                            .tvFocus(),
+                    )
+                }
+            }
         }
     }
-    HorizontalDivider()
 }
 
 @Composable
@@ -356,6 +392,7 @@ private fun TrackRow(
     isCurrent: Boolean,
     onClick: () -> Unit,
     downloaded: Boolean,
+    downloading: Boolean,
     downloadEnabled: Boolean,
     onDownload: () -> Unit,
 ) {
@@ -389,19 +426,25 @@ private fun TrackRow(
                 )
             }
         }
-        if (downloaded) {
-            Icon(
-                imageVector = Icons.Filled.CheckCircle,
-                contentDescription = "Трек скачан",
-                tint = MaterialTheme.colorScheme.primary,
-            )
-        } else {
-            IconButton(onClick = onDownload, enabled = downloadEnabled) {
-                Icon(
-                    imageVector = Icons.Filled.Download,
-                    contentDescription = "Скачать трек",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+            when {
+                downloading -> CircularProgressIndicator(
+                    modifier = Modifier.size(24.dp),
+                    strokeWidth = 2.5.dp,
+                    color = MaterialTheme.colorScheme.primary,
                 )
+                downloaded -> Icon(
+                    imageVector = Icons.Filled.CheckCircle,
+                    contentDescription = "Трек скачан",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                else -> IconButton(onClick = onDownload, enabled = downloadEnabled) {
+                    Icon(
+                        imageVector = Icons.Filled.Download,
+                        contentDescription = "Скачать трек",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

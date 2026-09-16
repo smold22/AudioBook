@@ -4,7 +4,6 @@ import android.net.Uri
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -34,6 +33,7 @@ import androidx.navigation.NavHostController
 import com.yourapp.audiobook.AudioBookApplication
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.ui.components.bookItems
+import dev.chrisbanes.haze.hazeSource
 
 @Composable
 fun SeriesBooksScreen(
@@ -52,6 +52,15 @@ fun SeriesBooksScreen(
     val rawViewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
     // Сетка в 3 столбца доступна только в горизонтальном режиме и на Android TV.
     val viewMode = if (rawViewMode == SettingsStore.VIEW_GRID3 && !isLandscapeOrTv) SettingsStore.VIEW_GRID else rawViewMode
+    val uiMode by app.settingsStore.uiMode.collectAsStateWithLifecycle(initialValue = null)
+    val isTv = uiMode == SettingsStore.UI_MODE_TV
+    // Compute span count for grid layout based on view mode and TV mode
+    val spanCount = when {
+        viewMode == SettingsStore.VIEW_LIST -> 1
+        viewMode == SettingsStore.VIEW_GRID -> 2
+        viewMode == SettingsStore.VIEW_GRID3 -> if (isTv) 5 else 3
+        else -> 2 // default fallback
+    }
 
     val shouldLoadMore by remember {
         derivedStateOf {
@@ -71,21 +80,10 @@ fun SeriesBooksScreen(
         if (shouldLoadMore) viewModel.loadMore()
     }
 
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = { navController.popBackStack() }) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
-            }
-            Text(
-                text = seriesTitle,
-                style = MaterialTheme.typography.titleLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+    val haze = screenHaze()
+
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().hazeSource(haze)) {
 
         if (state.books.isEmpty() && !state.loading && state.error == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -94,12 +92,13 @@ fun SeriesBooksScreen(
         } else {
             LazyColumn(
                 state = listState,
-                contentPadding = PaddingValues(vertical = 8.dp),
+                contentPadding = PaddingValues(top = GlassHeaderHeight + 4.dp, bottom = GlassBottomClearance),
                 modifier = Modifier.fillMaxSize(),
             ) {
                 bookItems(
                     books = state.books,
                     viewMode = viewMode,
+                    spanCount = spanCount,
                     onBookClick = { book ->
                         navController.navigate("book/${Uri.encode(app.bookCache.keyOf(book))}")
                     },
@@ -128,6 +127,20 @@ fun SeriesBooksScreen(
                     }
                 }
             }
+        }
+        }
+        GlassHeader(
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
+            IconButton(onClick = { navController.popBackStack() }) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+            }
+            Text(
+                text = seriesTitle,
+                style = MaterialTheme.typography.titleLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

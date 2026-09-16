@@ -4,16 +4,14 @@ import android.net.Uri
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.WatchLater
-import androidx.compose.material3.HorizontalDivider
+
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -33,6 +31,7 @@ import com.yourapp.audiobook.AudioBookApplication
 import com.yourapp.audiobook.data.AuthorGender
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.ui.components.bookItems
+import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.launch
 
 @Composable
@@ -44,8 +43,17 @@ fun WatchlistScreen(navController: NavHostController) {
     val deadKeys by app.deadBooksStore.deadKeys.collectAsStateWithLifecycle(initialValue = emptySet())
     val hideFemaleAuthors by app.settingsStore.hideFemaleAuthors.collectAsStateWithLifecycle(initialValue = false)
     val rawViewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
+    val uiMode by app.settingsStore.uiMode.collectAsStateWithLifecycle(initialValue = null)
+    val isTv = uiMode == SettingsStore.UI_MODE_TV
     // Сетка в 3 столбца доступна только в горизонтальном режиме и на Android TV.
     val viewMode = if (rawViewMode == SettingsStore.VIEW_GRID3 && !isLandscapeOrTv) SettingsStore.VIEW_GRID else rawViewMode
+    // Compute span count for grid layout based on view mode and TV mode
+    val spanCount = when {
+        viewMode == SettingsStore.VIEW_LIST -> 1
+        viewMode == SettingsStore.VIEW_GRID -> 2
+        viewMode == SettingsStore.VIEW_GRID3 -> if (isTv) 5 else 3
+        else -> 2 // default fallback
+    }
     val visibleWatchlist = remember(watchlist, deadKeys, hideFemaleAuthors) {
         watchlist.filterNot { book ->
             "${book.sourceId}:${book.id}" in deadKeys ||
@@ -53,17 +61,10 @@ fun WatchlistScreen(navController: NavHostController) {
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = { navController.popBackStack() }) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
-            }
-            Text("Буду слушать", style = MaterialTheme.typography.titleLarge)
-        }
-        HorizontalDivider()
+    val haze = screenHaze()
+
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().hazeSource(haze)) {
 
         if (visibleWatchlist.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -83,16 +84,17 @@ fun WatchlistScreen(navController: NavHostController) {
             }
         } else {
             LazyColumn(
-                contentPadding = PaddingValues(vertical = 8.dp),
+                contentPadding = PaddingValues(top = GlassHeaderHeight + 4.dp, bottom = GlassBottomClearance),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                bookItems(
-                    books = visibleWatchlist,
-                    viewMode = viewMode,
-                    onBookClick = { book ->
-                        navController.navigate("book/${Uri.encode(app.bookCache.keyOf(book))}")
-                    },
-                    action = { book ->
+bookItems(
+    books = visibleWatchlist,
+    viewMode = viewMode,
+    spanCount = spanCount,
+    onBookClick = { book ->
+        navController.navigate("book/${Uri.encode(app.bookCache.keyOf(book))}")
+    },
+    action = { book ->
                         IconButton(onClick = {
                             scope.launch { app.watchlistStore.remove(app.bookCache.keyOf(book)) }
                         }) {
@@ -105,6 +107,15 @@ fun WatchlistScreen(navController: NavHostController) {
                     },
                 )
             }
+        }
+        }
+        GlassHeader(
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
+            IconButton(onClick = { navController.popBackStack() }) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+            }
+            Text("Буду слушать", style = MaterialTheme.typography.titleLarge)
         }
     }
 }

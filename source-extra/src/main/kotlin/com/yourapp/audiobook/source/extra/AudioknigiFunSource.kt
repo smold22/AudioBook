@@ -76,8 +76,6 @@ class AudioknigiFunSource(
         return parseBooks(getHtml(client, target))
     }
 
-    override fun supportsSeries(): Boolean = true
-
     override suspend fun seriesBooks(seriesUrl: String, page: Int): List<Book> {
         val target = if (page <= 1) seriesUrl else "$seriesUrl?page=$page"
         return parseBooks(getHtml(client, target))

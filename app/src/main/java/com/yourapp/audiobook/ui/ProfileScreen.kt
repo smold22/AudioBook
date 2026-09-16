@@ -2,8 +2,10 @@ package com.yourapp.audiobook.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Paid
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FavoriteBorder
@@ -21,7 +24,7 @@ import androidx.compose.material.icons.outlined.WatchLater
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
+
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -41,45 +44,53 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.yourapp.audiobook.AudioBookApplication
 import com.yourapp.audiobook.data.sync.BackupInfo
+import dev.chrisbanes.haze.hazeSource
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 @Composable
 fun ProfileScreen(navController: NavHostController) {
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
-    ) {
-        Text(
-            "Я",
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-        )
-        HorizontalDivider()
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .hazeSource(screenHaze())
+                .verticalScroll(rememberScrollState()),
+        ) {
+            Spacer(Modifier.height(GlassHeaderHeight))
         ProfileRow(
             title = "Избранное",
             subtitle = "Отмеченные книги",
             icon = { Icon(Icons.Outlined.FavoriteBorder, contentDescription = null) },
             onClick = { navController.navigate("favorites") },
         )
-        HorizontalDivider()
         ProfileRow(
             title = "Буду слушать",
             subtitle = "Отложенные книги",
             icon = { Icon(Icons.Outlined.WatchLater, contentDescription = null) },
             onClick = { navController.navigate("watchlist") },
         )
-        HorizontalDivider()
+        ProfileRow(
+            title = "Донаты",
+            subtitle = "Поддержать разработку",
+            icon = { Icon(Icons.Filled.Paid, contentDescription = null) },
+            onClick = { navController.navigate("donate") },
+        )
         ProfileRow(
             title = "Настройки",
             subtitle = "Тема, кеш, бэкап",
             icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
             onClick = { navController.navigate("settings") },
         )
-        HorizontalDivider()
         GoogleSyncSection()
+        Spacer(Modifier.height(GlassBottomClearance))
+        }
+        GlassHeader(
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
+            Text("Я", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 12.dp))
+        }
     }
 }
 
@@ -200,7 +211,6 @@ private fun GoogleSyncSection() {
             },
         )
     }
-    HorizontalDivider()
 }
 
 @Composable
@@ -251,7 +261,6 @@ private fun BackupsDialog(
                                 )
                             }
                         }
-                        HorizontalDivider()
                     }
                 }
                 if (backups.isEmpty()) {

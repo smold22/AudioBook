@@ -1,6 +1,8 @@
 package com.yourapp.audiobook.ui.components
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,6 +15,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.yourapp.audiobook.AudioBookApplication
 import com.yourapp.audiobook.source.api.Book
+import com.yourapp.audiobook.ui.isTvMode
 import com.yourapp.audiobook.ui.rememberAppImageLoader
 import com.yourapp.audiobook.ui.tvFocus
 
@@ -36,13 +43,26 @@ internal fun sourceName(book: Book): String? =
     (LocalContext.current.applicationContext as? AudioBookApplication)
         ?.sourceRegistry?.get(book.sourceId)?.name
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun BookCard(book: Book, onClick: () -> Unit) {
     val imageLoader = rememberAppImageLoader()
+    val tvMode = isTvMode
+    var contextBook by remember { mutableStateOf<Book?>(null) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .then(
+                if (tvMode) {
+                    Modifier.clickable(onClick = onClick)
+                } else {
+                    Modifier.combinedClickable(
+                        onClick = onClick,
+                        onLongClickLabel = "Действия книги",
+                        onLongClick = { contextBook = book },
+                    )
+                },
+            )
             .tvFocus()
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -54,7 +74,7 @@ fun BookCard(book: Book, onClick: () -> Unit) {
             error = CoverError,
             imageLoader = imageLoader,
             modifier = Modifier
-                .size(78.dp)
+                .size(width = 76.dp, height = 114.dp)
                 .clip(RoundedCornerShape(8.dp)),
             contentScale = ContentScale.Crop,
         )
@@ -115,5 +135,8 @@ fun BookCard(book: Book, onClick: () -> Unit) {
                 )
             }
         }
+    }
+    if (!tvMode) {
+        BookContextMenu(contextBook) { contextBook = null }
     }
 }

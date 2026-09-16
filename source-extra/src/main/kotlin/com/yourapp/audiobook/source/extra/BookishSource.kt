@@ -83,8 +83,6 @@ class BookishSource(
         return parseBooks(getHtml(client, target))
     }
 
-    override fun supportsSeries(): Boolean = true
-
     override suspend fun seriesBooks(seriesUrl: String, page: Int): List<Book> {
         val target = if (page <= 1) seriesUrl else "$seriesUrl?cstart=${(page - 1) * 20}"
         return parseBooks(getHtml(client, target))

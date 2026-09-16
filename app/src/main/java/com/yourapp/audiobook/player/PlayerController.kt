@@ -51,6 +51,7 @@ fun Uri.stripRefParam(): Pair<Uri, String?> {
 data class NowPlaying(
     val book: Book,
     val tracks: List<AudioTrack>,
+    val details: BookDetails,
 )
 
 enum class SleepTimerMode { TIME, END_OF_CHAPTER }
@@ -198,6 +199,17 @@ class PlayerController(
     private val _sleepTimer = MutableStateFlow<SleepTimer?>(null)
     val sleepTimer: StateFlow<SleepTimer?> = _sleepTimer.asStateFlow()
 
+    /** Находит следующую книгу серии (цикла) после завершения текущей. Устанавливается приложением. */
+    var nextSeriesBookProvider: (suspend (BookDetails) -> Book?)? = null
+
+    /** Воспроизводит указанную книгу (загружает детали и продолжает с сохранённой позиции). Устанавливается приложением. */
+    var playBook: (suspend (Book) -> Unit)? = null
+
+    private val _nextBookSuggestion = MutableStateFlow<Book?>(null)
+    val nextBookSuggestion: StateFlow<Book?> = _nextBookSuggestion.asStateFlow()
+
+    private var bookEndHandled = false
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     val equalizer = EqualizerController(equalizerStore, scope)
@@ -213,6 +225,24 @@ class PlayerController(
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 equalizer.attachIfNeeded(player.audioSessionId)
+            }
+        })
+        player.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState != Player.STATE_ENDED) {
+                    bookEndHandled = false
+                    return
+                }
+                if (bookEndHandled) return
+                val now = _nowPlaying.value ?: return
+                if (!player.playWhenReady) return
+                if (player.mediaItemCount == 0 || player.currentMediaItemIndex != player.mediaItemCount - 1) return
+                bookEndHandled = true
+                val details = now.details
+                scope.launch {
+                    val next = nextSeriesBookProvider?.invoke(details)
+                    if (next != null) _nextBookSuggestion.value = next
+                }
             }
         })
         player.addListener(object : Player.Listener {
@@ -294,6 +324,7 @@ class PlayerController(
     fun play(details: BookDetails, startIndex: Int, startPositionMs: Long, localUris: List<Uri?>? = null) {
         if (details.tracks.isEmpty()) return
         _sleepTimer.value = null
+        _nextBookSuggestion.value = null
         val items = details.tracks.mapIndexed { index, track ->
             val uri = localUris?.getOrNull(index) ?: Uri.parse(track.url)
             MediaItem.Builder()
@@ -317,7 +348,7 @@ class PlayerController(
         player.prepare()
         player.playWhenReady = true
         equalizer.attachIfNeeded(player.audioSessionId)
-        _nowPlaying.value = NowPlaying(details.book, details.tracks)
+        _nowPlaying.value = NowPlaying(details.book, details.tracks, details)
         scope.launch {
             historyStore.record(details.book)
             _bookmarks.value = bookmarksStore.load(bookKey(details.book))
@@ -398,16 +429,6 @@ class PlayerController(
         player.playWhenReady = true
     }
 
-    private val speeds = floatArrayOf(1f, 1.25f, 1.5f, 1.75f, 2f, 2.5f, 3f, 0.75f)
-
-    fun cycleSpeed(): Float {
-        if (player.mediaItemCount == 0) return 1f
-        val current = player.playbackParameters.speed
-        val next = speeds[(speeds.indexOfFirst { it == current } + 1).let { if (it >= speeds.size) 0 else it }]
-        setSpeed(next)
-        return next
-    }
-
     fun setSpeed(speed: Float) {
         if (player.mediaItemCount == 0) return
         player.playbackParameters = PlaybackParameters(speed)
@@ -417,12 +438,25 @@ class PlayerController(
     fun stopAndClear() {
         saveProgressNow()
         _sleepTimer.value = null
+        _nextBookSuggestion.value = null
         player.stop()
         player.clearMediaItems()
         _nowPlaying.value = null
         _bookmarks.value = emptyList()
         mediaSession.release()
         mediaSession = buildSession()
+    }
+
+    /** Пользователь пропустил предложение продолжить серию. */
+    fun dismissNextBookSuggestion() {
+        _nextBookSuggestion.value = null
+    }
+
+    /** Воспроизводит предложенную следующую книгу серии. */
+    fun playNextBook() {
+        val next = _nextBookSuggestion.value ?: return
+        _nextBookSuggestion.value = null
+        scope.launch { playBook?.invoke(next) }
     }
 
     private companion object {

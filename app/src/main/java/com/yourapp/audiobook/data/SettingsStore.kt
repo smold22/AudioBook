@@ -7,6 +7,8 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -18,6 +20,8 @@ private val Context.settingsDataStore by preferencesDataStore(name = "settings")
 class SettingsStore(context: Context) {
 
     private val appContext = context.applicationContext
+
+    private val gson = Gson()
 
     /** Быстрое зеркало режима управления для мгновенного роутинга при запуске. */
     private val uiModeMirror =
@@ -43,6 +47,7 @@ class SettingsStore(context: Context) {
     private val accentColorKey = stringPreferencesKey("accent_color")
     private val customAccentColorKey = stringPreferencesKey("custom_accent_color")
     private val hiddenSourcesKey = stringSetPreferencesKey("hidden_sources")
+    private val homeGenresKey = stringPreferencesKey("home_genres")
     private val homeGenreSourceKey = stringPreferencesKey("home_genre_source")
     private val homeGenreUrlKey = stringPreferencesKey("home_genre_url")
     private val homeGenreNameKey = stringPreferencesKey("home_genre_name")
@@ -97,13 +102,23 @@ class SettingsStore(context: Context) {
     val hiddenSources: Flow<Set<String>> =
         appContext.settingsDataStore.data.map { it[hiddenSourcesKey].orEmpty() }
 
-    /** Жанр, книги которого показываются на главном экране (null — все книги). */
-    val homeGenre: Flow<HomeGenre?> =
+    /** Жанры, книги которых показываются на главном экране (пустой список — все книги). */
+    val homeGenres: Flow<List<HomeGenre>> =
         appContext.settingsDataStore.data.map { prefs ->
-            val sourceId = prefs[homeGenreSourceKey] ?: return@map null
-            val url = prefs[homeGenreUrlKey] ?: return@map null
-            val name = prefs[homeGenreNameKey] ?: return@map null
-            HomeGenre(sourceId = sourceId, url = url, name = name)
+            prefs[homeGenresKey]?.let { raw ->
+                runCatching {
+                    gson.fromJson<List<HomeGenre>>(
+                        raw,
+                        object : TypeToken<List<HomeGenre>>() {}.type,
+                    )
+                }.getOrNull()
+            } ?: prefs[homeGenreSourceKey]?.let { sourceId ->
+                prefs[homeGenreUrlKey]?.let { url ->
+                    prefs[homeGenreNameKey]?.let { name ->
+                        listOf(HomeGenre(sourceId = sourceId, url = url, name = name))
+                    }
+                }
+            } ?: emptyList()
         }
 
     /** Выбранная иконка приложения ("default" или "alt1"…"alt5"). */
@@ -217,28 +232,12 @@ class SettingsStore(context: Context) {
     suspend fun hiddenSourceIds(): Set<String> =
         appContext.settingsDataStore.data.first()[hiddenSourcesKey].orEmpty()
 
-    suspend fun setSourceHidden(id: String, hidden: Boolean) {
+    suspend fun setHomeGenres(genres: List<HomeGenre>) {
         appContext.settingsDataStore.edit { prefs ->
-            prefs[hiddenSourcesKey] = if (hidden) {
-                prefs[hiddenSourcesKey].orEmpty() + id
-            } else {
-                prefs[hiddenSourcesKey].orEmpty() - id
-            }
-        }
-        changeSignal.emit(Unit)
-    }
-
-    suspend fun setHomeGenre(genre: HomeGenre?) {
-        appContext.settingsDataStore.edit { prefs ->
-            if (genre == null) {
-                prefs.remove(homeGenreSourceKey)
-                prefs.remove(homeGenreUrlKey)
-                prefs.remove(homeGenreNameKey)
-            } else {
-                prefs[homeGenreSourceKey] = genre.sourceId
-                prefs[homeGenreUrlKey] = genre.url
-                prefs[homeGenreNameKey] = genre.name
-            }
+            prefs[homeGenresKey] = gson.toJson(genres)
+            prefs.remove(homeGenreSourceKey)
+            prefs.remove(homeGenreUrlKey)
+            prefs.remove(homeGenreNameKey)
         }
         changeSignal.emit(Unit)
     }
@@ -391,13 +390,28 @@ class SettingsStore(context: Context) {
         changeSignal.emit(Unit)
     }
 
-    /** Снимок всех синхронизируемых настроек (без путей к скачанным файлам). */
+    /** Настройки, которые являются локальными для устройства и НЕ должны синхронизироваться через облако. */
+    private val localOnlyKeys = setOf(
+        downloadFolderName,
+        uiModeKey.name,
+        sourceKey.name,
+        hiddenSourcesKey.name,
+        homeGenresKey.name,
+        homeGenreSourceKey.name,
+        homeGenreUrlKey.name,
+        homeGenreNameKey.name,
+        IgnoreSection.GENRE.key,
+        IgnoreSection.AUTHOR.key,
+        IgnoreSection.READER.key,
+    )
+
+    /** Снимок всех синхронизируемых настроек (без путей к скачанным файлам и локальных источников/жанров). */
     suspend fun snapshotAll(): Map<String, String> {
         val prefs = appContext.settingsDataStore.data.first()
         val result = mutableMapOf<String, String>()
         prefs.asMap().forEach { (key, value) ->
             val name = key.name
-            if (name == downloadFolderName || name.startsWith(bookFolderPrefix) ||
+            if (name in localOnlyKeys || name.startsWith(bookFolderPrefix) ||
                 name.startsWith(bookMetaPrefix) || name.startsWith(bookTracksPrefix)
             ) {
                 return@forEach
@@ -417,7 +431,7 @@ class SettingsStore(context: Context) {
         if (snapshot.isEmpty()) return
         appContext.settingsDataStore.edit { prefs ->
             snapshot.forEach { (name, value) ->
-                if (name == downloadFolderName || name.startsWith(bookFolderPrefix) ||
+                if (name in localOnlyKeys || name.startsWith(bookFolderPrefix) ||
                     name.startsWith(bookMetaPrefix) || name.startsWith(bookTracksPrefix)
                 ) {
                     return@forEach
@@ -425,9 +439,6 @@ class SettingsStore(context: Context) {
                 when (name) {
                     resumeOnLaunchKey.name, openPlayerOnLaunchKey.name, hideTabLabelsKey.name, hideFemaleAuthorsKey.name, closeOnBackLongPressKey.name ->
                         prefs[booleanPreferencesKey(name)] = value.toBooleanStrictOrNull() ?: false
-                    IgnoreSection.GENRE.key, IgnoreSection.AUTHOR.key, IgnoreSection.READER.key, hiddenSourcesKey.name ->
-                        prefs[stringSetPreferencesKey(name)] =
-                            value.split(SET_ITEM_SEPARATOR).filter { it.isNotEmpty() }.toSet()
                     else -> prefs[stringPreferencesKey(name)] = value
                 }
             }
@@ -447,6 +458,7 @@ class SettingsStore(context: Context) {
         const val FONT_SMALL = "small"
         const val FONT_MEDIUM = "medium"
         const val FONT_LARGE = "large"
+        const val FONT_VERY_LARGE = "very_large"
 
         const val TAB_UNDERLAY_LOW = "low"
         const val TAB_UNDERLAY_DEFAULT = "default"

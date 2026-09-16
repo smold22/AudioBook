@@ -66,7 +66,7 @@ fun MiniPlayer(
             model = nowPlaying.book.coverUrl,
             contentDescription = nowPlaying.book.title,
             imageLoader = imageLoader,
-            modifier = Modifier.size(44.dp),
+            modifier = Modifier                            .size(width = 32.dp, height = 48.dp),
         )
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {

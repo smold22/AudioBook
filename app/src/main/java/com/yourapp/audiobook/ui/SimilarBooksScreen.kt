@@ -36,11 +36,14 @@ import com.yourapp.audiobook.ui.components.bookItems
 import dev.chrisbanes.haze.hazeSource
 
 @Composable
-fun GenreBooksScreen(genreUrl: String, genreName: String, navController: NavHostController) {
+fun SimilarBooksScreen(
+    bookKey: String,
+    navController: NavHostController,
+) {
     val app = LocalContext.current.applicationContext as AudioBookApplication
-    val viewModel: GenreBooksViewModel = viewModel(
-        key = genreUrl,
-        factory = GenreBooksViewModelFactory(app, genreUrl, genreName),
+    val viewModel: SimilarBooksViewModel = viewModel(
+        key = "similar:$bookKey",
+        factory = SimilarBooksViewModelFactory(app, bookKey),
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
@@ -49,12 +52,11 @@ fun GenreBooksScreen(genreUrl: String, genreName: String, navController: NavHost
     val viewMode = if (rawViewMode == SettingsStore.VIEW_GRID3 && !isLandscapeOrTv) SettingsStore.VIEW_GRID else rawViewMode
     val uiMode by app.settingsStore.uiMode.collectAsStateWithLifecycle(initialValue = null)
     val isTv = uiMode == SettingsStore.UI_MODE_TV
-    // Compute span count for grid layout based on view mode and TV mode
     val spanCount = when {
         viewMode == SettingsStore.VIEW_LIST -> 1
         viewMode == SettingsStore.VIEW_GRID -> 2
         viewMode == SettingsStore.VIEW_GRID3 -> if (isTv) 5 else 3
-        else -> 2 // default fallback
+        else -> 2
     }
 
     val shouldLoadMore by remember {
@@ -95,7 +97,8 @@ fun GenreBooksScreen(genreUrl: String, genreName: String, navController: NavHost
                     viewMode = viewMode,
                     spanCount = spanCount,
                     onBookClick = { book ->
-                        navController.navigate("book/${Uri.encode(app.bookCache.keyOf(book))}")
+                        app.bookCache.put(book)
+                        navController.navigate("book/${Uri.encode("${book.sourceId}:${book.id}")}")
                     },
                 )
                 if (state.loading) {
@@ -131,7 +134,7 @@ fun GenreBooksScreen(genreUrl: String, genreName: String, navController: NavHost
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
             }
             Text(
-                text = genreName,
+                text = "Похожие книги",
                 style = MaterialTheme.typography.titleLarge,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

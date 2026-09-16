@@ -62,15 +62,10 @@ class UkNigSource(
             seriesIndex = seriesIndex,
             seriesUrl = seriesUrl,
         )
-        val related = runCatching {
-            val bookId = Regex("""/books/(\d+)""").find(url)?.groupValues?.get(1).orEmpty()
-            if (bookId.isBlank()) emptyList() else parseCarousel(getHtml(client, "$baseUrl/api/books/$bookId/authorbooks"))
-        }.getOrDefault(emptyList())
         return BookDetails(
             book = book,
             description = description,
             tracks = fetchTracks(html),
-            related = related,
         )
     }
 
@@ -118,8 +113,6 @@ class UkNigSource(
         }
         return parseBooks(getHtml(client, target))
     }
-
-    override fun supportsSeries(): Boolean = true
 
     override suspend fun seriesBooks(seriesUrl: String, page: Int): List<Book> {
         val target = if (page <= 1) seriesUrl else {

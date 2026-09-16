@@ -4,26 +4,24 @@ import android.net.Uri
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -32,6 +30,7 @@ import com.yourapp.audiobook.AudioBookApplication
 import com.yourapp.audiobook.data.AuthorGender
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.ui.components.bookItems
+import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.launch
 
 @Composable
@@ -45,24 +44,25 @@ fun FavoritesScreen(navController: NavHostController) {
     val rawViewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
     // Сетка в 3 столбца доступна только в горизонтальном режиме и на Android TV.
     val viewMode = if (rawViewMode == SettingsStore.VIEW_GRID3 && !isLandscapeOrTv) SettingsStore.VIEW_GRID else rawViewMode
+    val uiMode by app.settingsStore.uiMode.collectAsStateWithLifecycle(initialValue = null)
+    val isTv = uiMode == SettingsStore.UI_MODE_TV
+    val spanCount = when {
+        viewMode == SettingsStore.VIEW_LIST -> 1
+        viewMode == SettingsStore.VIEW_GRID -> 2
+        viewMode == SettingsStore.VIEW_GRID3 -> if (isTv) 5 else 3
+        else -> 2 // default fallback
+    }
     val visibleFavorites = remember(favorites, deadKeys, hideFemaleAuthors) {
         favorites.filterNot { book ->
             "${book.sourceId}:${book.id}" in deadKeys ||
-                (hideFemaleAuthors && book.author != null && AuthorGender.isFemaleAuthor(book.author!!))
+                    (hideFemaleAuthors && book.author != null && AuthorGender.isFemaleAuthor(book.author!!))
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = { navController.popBackStack() }) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
-            }
-            Text("Избранное", style = MaterialTheme.typography.titleLarge)
-        }
-        HorizontalDivider()
+    val haze = screenHaze()
+
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().hazeSource(haze)) {
 
         if (visibleFavorites.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -75,12 +75,13 @@ fun FavoritesScreen(navController: NavHostController) {
             }
         } else {
             LazyColumn(
-                contentPadding = PaddingValues(vertical = 8.dp),
+                contentPadding = PaddingValues(top = GlassHeaderHeight + 4.dp, bottom = GlassBottomClearance),
                 modifier = Modifier.fillMaxSize(),
             ) {
                 bookItems(
                     books = visibleFavorites,
                     viewMode = viewMode,
+                    spanCount = spanCount,
                     onBookClick = { book ->
                         navController.navigate("book/${Uri.encode(app.bookCache.keyOf(book))}")
                     },
@@ -97,6 +98,15 @@ fun FavoritesScreen(navController: NavHostController) {
                     },
                 )
             }
+        }
+        }
+        GlassHeader(
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
+            IconButton(onClick = { navController.popBackStack() }) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+            }
+            Text("Избранное", style = MaterialTheme.typography.titleLarge)
         }
     }
 }

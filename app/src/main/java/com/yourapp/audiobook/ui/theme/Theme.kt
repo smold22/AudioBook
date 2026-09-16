@@ -4,6 +4,7 @@ import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -19,6 +20,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Density
 import androidx.core.view.WindowCompat
+import com.yourapp.audiobook.UiModeRouter
 import com.yourapp.audiobook.data.SettingsStore
 
 private fun mix(a: Color, b: Color, t: Float): Color = lerp(a, b, t)
@@ -35,9 +37,10 @@ private fun customAccentScheme(base: Color, dark: Boolean): ColorScheme {
     val primaryContainer = if (dark) mix(solid, Color.Black, 0.68f) else mix(solid, Color.White, 0.72f)
     val secondaryContainer = if (dark) mix(solid, Color.Black, 0.5f) else mix(solid, Color.White, 0.84f)
     return if (dark) {
+        val lightPrimary = mix(solid, Color.White, 0.35f)
         darkColorScheme(
-            primary = base,
-            onPrimary = readableOn(solid),
+            primary = lightPrimary,
+            onPrimary = readableOn(lightPrimary),
             primaryContainer = primaryContainer,
             onPrimaryContainer = readableOn(primaryContainer),
             secondary = mix(solid, Color.White, 0.35f),
@@ -95,9 +98,12 @@ fun AudioBookTheme(
     content: @Composable () -> Unit
 ) {
     val useDark = darkTheme ?: isSystemInDarkTheme()
-    val useDynamic = dynamicColor && accentColor == SettingsStore.ACCENT_DYNAMIC
+    // На Android TV динамический цвет не поддерживается и даёт сломанную палитру.
+    val tvDevice = UiModeRouter.isTvDevice(LocalContext.current)
+    val useDynamic = dynamicColor && accentColor == SettingsStore.ACCENT_DYNAMIC &&
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !tvDevice
     val colorScheme = when {
-        useDynamic && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+        useDynamic -> {
             val context = LocalContext.current
             if (useDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
@@ -127,7 +133,15 @@ fun AudioBookTheme(
         MaterialTheme(
             colorScheme = colorScheme,
             typography = Typography,
-            content = content
-        )
+        ) {
+            // Явно задаём цвет контента: в новых версиях Material3
+            // LocalContentColor для сгенерированной схемы может быть чёрным,
+            // из-за чего текст и иконки без явного цвета в тёмной теме чёрные.
+            CompositionLocalProvider(
+                LocalContentColor provides colorScheme.onSurface,
+            ) {
+                content()
+            }
+        }
     }
 }

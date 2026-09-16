@@ -24,7 +24,7 @@ android {
         minSdk = 24
         targetSdk = 37
         versionCode = 4
-        versionName = "1.4.2"
+        versionName = "1.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -93,6 +93,8 @@ dependencies {
 
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    implementation(libs.haze)
+    implementation(libs.lottie.compose)
 
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.exoplayer.hls)

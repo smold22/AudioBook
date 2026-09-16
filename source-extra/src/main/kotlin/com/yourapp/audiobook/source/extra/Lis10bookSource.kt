@@ -79,7 +79,6 @@ class Lis10bookSource(
             book = book,
             description = description,
             tracks = fetchTracks(url, title),
-            related = doc.select(".hscroll a.mcard").mapNotNull { mcard(it) },
         )
     }
 
@@ -87,8 +86,6 @@ class Lis10bookSource(
         val target = if (page <= 1) url else paginatedUrl(url, page)
         return parseBooks(getHtml(client, target))
     }
-
-    override fun supportsSeries(): Boolean = true
 
     override suspend fun seriesBooks(seriesUrl: String, page: Int): List<Book> {
         val target = if (page <= 1) seriesUrl else "${seriesUrl.trimEnd('/')}?page=$page"

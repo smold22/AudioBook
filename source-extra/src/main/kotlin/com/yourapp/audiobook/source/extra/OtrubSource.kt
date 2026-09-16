@@ -97,8 +97,6 @@ class OtrubSource(
         return parseBooks(getHtml(client, target))
     }
 
-    override fun supportsSeries(): Boolean = true
-
     override suspend fun seriesBooks(seriesUrl: String, page: Int): List<Book> {
         val target = if (page <= 1) seriesUrl else {
             if (seriesUrl.contains("?")) seriesUrl.replace(Regex("""p=\d+""")) { "p=$page" }

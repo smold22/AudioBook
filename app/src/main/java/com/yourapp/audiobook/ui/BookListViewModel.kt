@@ -56,6 +56,11 @@ abstract class BookListViewModel(app: Application) : AndroidViewModel(app) {
 
     protected open suspend fun currentSourceId(): String? = null
 
+    /** Обновляет состояние списка (для подклассов с собственным процессом загрузки). */
+    protected fun mutateState(transform: (BookListState) -> BookListState) {
+        _state.update(transform)
+    }
+
     protected fun isBlockError(e: Throwable): Boolean {
         val message = e.message ?: return false
         return message.contains("HTTP 400") || message.contains("HTTP 403") || message.contains("HTTP 429")
@@ -67,7 +72,7 @@ abstract class BookListViewModel(app: Application) : AndroidViewModel(app) {
         refresh()
     }
 
-    fun refresh() {
+    open fun refresh() {
         generation++
         currentPage = 0
         loadingJob?.cancel()
@@ -75,7 +80,7 @@ abstract class BookListViewModel(app: Application) : AndroidViewModel(app) {
         loadMore()
     }
 
-    fun loadMore() {
+    open fun loadMore() {
         if (loadingJob?.isActive == true) return
         if (_state.value.endReached) return
         val gen = generation
@@ -139,7 +144,7 @@ abstract class BookListViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun filterIgnored(books: List<Book>): List<Book> {
+    protected suspend fun filterIgnored(books: List<Book>): List<Book> {
         val genres = appContext.settingsStore.ignored(IgnoreSection.GENRE)
         val authors = appContext.settingsStore.ignored(IgnoreSection.AUTHOR)
         val readers = appContext.settingsStore.ignored(IgnoreSection.READER)
@@ -159,7 +164,7 @@ abstract class BookListViewModel(app: Application) : AndroidViewModel(app) {
         return filtered
     }
 
-    private companion object {
+    protected companion object {
         const val TARGET_BOOKS = 40
         const val MAX_PAGES_PER_LOAD = 20
     }

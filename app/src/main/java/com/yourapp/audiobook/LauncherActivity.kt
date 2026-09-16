@@ -35,7 +35,7 @@ class LauncherActivity : ComponentActivity() {
             requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         val app = application as AudioBookApplication
-        app.resumeLastBookIfEnabled(lifecycleScope, this)
+        app.resumeLastBookIfEnabled()
         // Мгновенный роутинг без ожидания DataStore — чтобы не мелькал промежуточный экран.
         val cachedMode = app.settingsStore.cachedUiMode()
         if (cachedMode != null) {

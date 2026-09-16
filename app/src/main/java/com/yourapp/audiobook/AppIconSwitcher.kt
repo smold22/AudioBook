@@ -38,17 +38,21 @@ object AppIconSwitcher {
             PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
             PackageManager.DONT_KILL_APP,
         )
+        // Сначала отключаем все алиасы, затем включаем выбранный — чтобы у лаунчера
+        // не было окна, когда активны две иконки одновременно.
         options.forEach { option ->
             pm.setComponentEnabledSetting(
                 ComponentName(context, "com.yourapp.audiobook.${option.alias}"),
-                if (option.key == effective) {
-                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED
-                } else {
-                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED
-                },
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
                 PackageManager.DONT_KILL_APP,
             )
         }
+        val selected = options.firstOrNull { it.key == effective } ?: options.first()
+        pm.setComponentEnabledSetting(
+            ComponentName(context, "com.yourapp.audiobook.${selected.alias}"),
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+            PackageManager.DONT_KILL_APP,
+        )
     }
 
     private val legacyKeys = mapOf("alt" to "alt1")

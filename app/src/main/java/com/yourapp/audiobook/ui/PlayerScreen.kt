@@ -38,11 +38,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.filled.Equalizer
@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.Replay30
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -127,7 +128,18 @@ fun PlayerScreen(navController: NavHostController) {
     var showChaptersDialog by remember { mutableStateOf(false) }
     var showTrackList by remember { mutableStateOf(true) }
     var showSpeedDialog by remember { mutableStateOf(false) }
+    var showReaderDialog by remember { mutableStateOf(false) }
     val trackListState = rememberLazyListState()
+    val readerOptions by viewModel.readerOptions.collectAsStateWithLifecycle()
+    val readerSearching by viewModel.readerSearching.collectAsStateWithLifecycle()
+    val readerError by viewModel.readerError.collectAsStateWithLifecycle()
+
+    LaunchedEffect(readerError) {
+        readerError?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            viewModel.consumeReaderError()
+        }
+    }
 
     LaunchedEffect(snapshot.trackIndex) {
         if (snapshot.trackIndex >= 0) {
@@ -244,6 +256,14 @@ fun PlayerScreen(navController: NavHostController) {
                     onSeek = viewModel::seekTo,
                 )
                 Spacer(Modifier.height(8.dp))
+                val currentTrackRemainingMs = (snapshot.durationMs - snapshot.positionMs).coerceAtLeast(0L)
+                val subsequentTracksDurationMs = playing.tracks
+                    .drop(snapshot.trackIndex + 1)
+                    .sumOf { (it.durationSeconds ?: 0) * 1000L }
+                val totalBookRemainingMs = if (snapshot.durationMs > 0) {
+                    currentTrackRemainingMs + subsequentTracksDurationMs
+                } else null
+
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         formatMs(snapshot.positionMs),
@@ -251,8 +271,16 @@ fun PlayerScreen(navController: NavHostController) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.weight(1f))
+                    if (totalBookRemainingMs != null && totalBookRemainingMs > 0) {
+                        Text(
+                            text = "Осталось: ${formatMs(totalBookRemainingMs)}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
                     Text(
-                        formatMs(snapshot.durationMs),
+                        "-${formatMs(currentTrackRemainingMs)}",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -316,13 +344,25 @@ fun PlayerScreen(navController: NavHostController) {
                     modifier = Modifier.weight(1f),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
+                    ReaderSelector(
+                        currentReader = playing.book.reader,
+                        searching = readerSearching,
+                        hasChoices = readerOptions.size > 1,
+                        onClick = {
+                            if (readerOptions.size > 1) {
+                                showReaderDialog = true
+                            } else {
+                                Toast.makeText(context, "Других чтецов не найдено", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                    )
+                    Spacer(Modifier.height(4.dp))
                     AsyncImage(
                         model = playing.book.coverUrl,
                         contentDescription = playing.book.title,
                         imageLoader = app.imageLoader,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(1f)
+                            .size(width = 220.dp, height = 330.dp)
                             .clip(RoundedCornerShape(12.dp)),
                         contentScale = ContentScale.Crop,
                     )
@@ -377,134 +417,67 @@ fun PlayerScreen(navController: NavHostController) {
         } else {
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 24.dp),
-                verticalArrangement = Arrangement.Center,
+                    .fillMaxSize()
+                    .padding(start = 24.dp, end = 24.dp, bottom = 48.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                ReaderSelector(
+                    currentReader = playing.book.reader,
+                    searching = readerSearching,
+                    hasChoices = readerOptions.size > 1,
+                    onClick = {
+                        if (readerOptions.size > 1) {
+                            showReaderDialog = true
+                        } else {
+                            Toast.makeText(context, "Других чтецов не найдено", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                )
+                Spacer(Modifier.height(8.dp))
                 Box(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    val spinTransition = rememberInfiniteTransition(label = "coverSpin")
-                    val rotation by spinTransition.animateFloat(
-                        initialValue = 0f,
-                        targetValue = 360f,
-                        animationSpec = infiniteRepeatable(
-                            animation = tween(durationMillis = 8000, easing = LinearEasing),
-                            repeatMode = RepeatMode.Restart,
-                        ),
-                        label = "coverRotation",
-                    )
-                    Box(
+                    AsyncImage(
+                        model = playing.book.coverUrl,
+                        contentDescription = playing.book.title,
+                        imageLoader = app.imageLoader,
                         modifier = Modifier
-                            .size(240.dp)
-                            .graphicsLayer {
-                                rotationZ = if (snapshot.isPlaying) rotation else 0f
-                            },
-                    ) {
-                        Canvas(Modifier.fillMaxSize()) {
-                            val radius = size.minDimension / 2f
-                            drawCircle(
-                                brush = Brush.radialGradient(
-                                    colors = listOf(Color(0xFF3A3A3A), Color(0xFF111111), Color(0xFF050505)),
-                                    center = Offset(size.width * 0.42f, size.height * 0.38f),
-                                    radius = radius,
-                                ),
-                                radius = radius,
-                            )
-                            drawCircle(
-                                brush = Brush.radialGradient(
-                                    colors = listOf(Color(0x66FFFFFF), Color.Transparent),
-                                    center = Offset(size.width * 0.35f, size.height * 0.3f),
-                                    radius = radius * 0.55f,
-                                ),
-                                radius = radius,
-                            )
-                            drawCircle(
-                                brush = Brush.radialGradient(
-                                    colors = listOf(Color(0x4DFFFFFF), Color.Transparent),
-                                    center = Offset(size.width * 0.68f, size.height * 0.72f),
-                                    radius = radius * 0.45f,
-                                ),
-                                radius = radius,
-                            )
-                            drawCircle(
-                                brush = Brush.linearGradient(
-                                    colors = listOf(Color(0x14FFFFFF), Color.Transparent),
-                                    start = Offset.Zero,
-                                    end = Offset(size.width, size.height),
-                                ),
-                                radius = radius,
-                            )
-                            val grooveColor = Color(0x1A000000)
-                            for (i in 1..16) {
-                                drawCircle(
-                                    color = grooveColor,
-                                    radius = radius * (0.56f + i * 0.026f),
-                                    style = Stroke(width = 1.5.dp.toPx()),
-                                )
-                            }
-                            val labelRadius = radius * 0.42f
-                            drawCircle(color = Color(0xFF1C1C1C), radius = labelRadius)
-                            drawCircle(
-                                brush = Brush.radialGradient(
-                                    colors = listOf(Color(0xFF262626), Color(0xFF141414)),
-                                    center = center,
-                                    radius = labelRadius,
-                                ),
-                                radius = labelRadius,
-                            )
-                            drawCircle(
-                                color = Color(0xFF444444),
-                                radius = labelRadius,
-                                style = Stroke(width = 1.5.dp.toPx()),
-                            )
-                        }
-                        AsyncImage(
-                            model = playing.book.coverUrl,
-                            contentDescription = playing.book.title,
-                            imageLoader = app.imageLoader,
-                            modifier = Modifier
-                                .size(180.dp)
-                                .align(Alignment.Center)
-                                .clip(CircleShape),
-                            contentScale = ContentScale.Crop,
-                        )
-                        Box(
-                            Modifier
-                                .size(16.dp)
-                                .align(Alignment.Center)
-                                .background(Color.Black, CircleShape),
-                        )
-                    }
+                            .fillMaxHeight(0.88f)
+                            .aspectRatio(2f / 3f)
+                            .clip(RoundedCornerShape(16.dp)),
+                        contentScale = ContentScale.Crop,
+                    )
                 }
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(8.dp))
                 val currentTrack = playing.tracks.getOrNull(snapshot.trackIndex)
                 Text(
                     text = currentTrack?.title ?: playing.book.title,
-                    style = MaterialTheme.typography.headlineSmall,
+                    style = MaterialTheme.typography.titleLarge,
                     textAlign = TextAlign.Center,
-                    maxLines = 2,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(2.dp))
                 Text(
                     text = playing.book.title,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(8.dp))
+                PlayerControls(
+                    modifier = Modifier.fillMaxWidth(),
+                    content = controlsContent,
+                )
             }
-            PlayerControls(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 12.dp),
-                content = controlsContent,
-            )
-            }
+        }
         }
     }
     if (showSleepDialog) {
@@ -567,6 +540,16 @@ fun PlayerScreen(navController: NavHostController) {
                 showSpeedDialog = false
             },
             onDismiss = { showSpeedDialog = false },
+        )
+    }
+    if (showReaderDialog) {
+        ReaderPickerDialog(
+            options = readerOptions,
+            onSelect = { option ->
+                viewModel.switchReader(option.book)
+                showReaderDialog = false
+            },
+            onDismiss = { showReaderDialog = false },
         )
     }
 }
@@ -681,6 +664,110 @@ private fun SpeedDialog(
                             Icon(
                                 Icons.Filled.Check,
                                 contentDescription = "Выбрано",
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Готово")
+            }
+        },
+    )
+}
+
+@Composable
+private fun ReaderSelector(
+    currentReader: String?,
+    searching: Boolean,
+    hasChoices: Boolean,
+    onClick: () -> Unit,
+) {
+    val reader = currentReader?.trim().orEmpty().ifBlank { "Выбрать чтеца" }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .tvFocus()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (searching) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(14.dp),
+                strokeWidth = 2.dp,
+            )
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(
+            text = "Выбор чтеца: $reader",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.tvFocus(),
+        )
+        Icon(
+            Icons.Filled.ArrowDropDown,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(18.dp),
+        )
+    }
+}
+
+@Composable
+private fun ReaderPickerDialog(
+    options: List<ReaderOption>,
+    onSelect: (ReaderOption) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Выбор чтеца") },
+        text = {
+            Column(
+                Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                options.forEach { option ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(option) }
+                            .tvFocus()
+                            .padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = option.book.reader?.trim().orEmpty().ifBlank { "Чтец" },
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = if (option.isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            )
+                            val subtitle = listOfNotNull(
+                                option.book.author,
+                                option.book.durationText,
+                            ).joinToString(" · ")
+                            if (subtitle.isNotBlank()) {
+                                Text(
+                                    text = subtitle,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        if (option.isCurrent) {
+                            Spacer(Modifier.width(8.dp))
+                            Icon(
+                                Icons.Filled.Check,
+                                contentDescription = "Текущий чтец",
                                 tint = MaterialTheme.colorScheme.primary,
                             )
                         }

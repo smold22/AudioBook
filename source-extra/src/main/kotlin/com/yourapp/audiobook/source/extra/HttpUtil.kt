@@ -138,9 +138,6 @@ suspend fun postForm(
     throw lastError ?: IOException("Ошибка запроса для $url")
 }
 
-fun String.unescapeJs(): String =
-    replace("\\\"", "\"").replace("\\\\", "\\").replace("\\/", "/")
-
 /** URL плейлиста из кода плеера Playerjs: new Playerjs({id:"...", file:"URL", ...}) */
 fun playerjsPlaylistUrl(html: String): String? =
     Regex(

@@ -25,7 +25,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -36,12 +35,9 @@ import com.yourapp.audiobook.ui.components.bookItems
 import dev.chrisbanes.haze.hazeSource
 
 @Composable
-fun GenreBooksScreen(genreUrl: String, genreName: String, navController: NavHostController) {
+fun NewBooksScreen(navController: NavHostController) {
     val app = LocalContext.current.applicationContext as AudioBookApplication
-    val viewModel: GenreBooksViewModel = viewModel(
-        key = genreUrl,
-        factory = GenreBooksViewModelFactory(app, genreUrl, genreName),
-    )
+    val viewModel: NewBooksViewModel = viewModel()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val rawViewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
@@ -131,10 +127,8 @@ fun GenreBooksScreen(genreUrl: String, genreName: String, navController: NavHost
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
             }
             Text(
-                text = genreName,
+                text = "Новинки",
                 style = MaterialTheme.typography.titleLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
             )
         }
     }

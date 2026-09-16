@@ -58,8 +58,6 @@ class IziBukSource(
         return parseBookList(get(target), id, baseUrl)
     }
 
-    override fun supportsSeries(): Boolean = true
-
     override suspend fun seriesBooks(seriesUrl: String, page: Int): List<Book> {
         val target = if (page <= 1) seriesUrl else {
             if (seriesUrl.contains("?")) "$seriesUrl&p=$page" else "$seriesUrl?p=$page"

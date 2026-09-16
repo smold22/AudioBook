@@ -4,16 +4,13 @@ import android.net.Uri
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.History
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -23,7 +20,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,7 +32,10 @@ import com.yourapp.audiobook.AudioBookApplication
 import com.yourapp.audiobook.data.AuthorGender
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.ui.components.bookItems
+import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+
 
 @Composable
 fun HistoryScreen(navController: NavHostController) {
@@ -50,17 +49,73 @@ fun HistoryScreen(navController: NavHostController) {
     val rawViewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
     // Сетка в 3 столбца доступна только в горизонтальном режиме и на Android TV.
     val viewMode = if (rawViewMode == SettingsStore.VIEW_GRID3 && !isLandscapeOrTv) SettingsStore.VIEW_GRID else rawViewMode
+    val uiMode by app.settingsStore.uiMode.collectAsStateWithLifecycle(initialValue = null)
+    val isTv = uiMode == SettingsStore.UI_MODE_TV
+    // Compute span count for grid layout based on view mode and TV mode
+    val spanCount = when {
+        viewMode == SettingsStore.VIEW_LIST -> 1
+        viewMode == SettingsStore.VIEW_GRID -> 2
+        viewMode == SettingsStore.VIEW_GRID3 -> if (isTv) 5 else 3
+        else -> 2 // default fallback
+    }
     val visibleHistory = remember(history, deadKeys, hideFemaleAuthors) {
         AuthorGender.filterFemale(
             history.map { it.book }.filterNot { "${it.sourceId}:${it.id}" in deadKeys },
             hideFemaleAuthors,
         )
     }
+    val haze = screenHaze()
 
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().hazeSource(haze)) {
+            if (visibleHistory.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Outlined.History,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.padding(4.dp))
+                        Text(
+                            if (history.isEmpty()) "История пуста" else "В истории только недоступные книги",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(24.dp),
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(top = GlassHeaderHeight + 4.dp, bottom = GlassBottomClearance),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    bookItems(
+                        books = visibleHistory,
+                        viewMode = viewMode,
+                        spanCount = spanCount,
+                        onBookClick = { book ->
+                            navController.navigate("book/${Uri.encode(app.bookCache.keyOf(book))}")
+                        },
+                        action = { book ->
+                            IconButton(onClick = {
+                                scope.launch {
+                                    app.historyStore.remove(app.bookCache.keyOf(book))
+                                }
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Delete,
+                                    contentDescription = "Удалить из истории",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        },
+                    )
+                }
+            }
+        }
+        GlassHeader(
+            modifier = Modifier.align(Alignment.TopCenter),
         ) {
             Text(
                 "История",
@@ -71,52 +126,6 @@ fun HistoryScreen(navController: NavHostController) {
                 TextButton(onClick = { showClearConfirm = true }) {
                     Text("Очистить")
                 }
-            }
-        }
-        HorizontalDivider()
-
-        if (visibleHistory.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Outlined.History,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.padding(4.dp))
-                    Text(
-                        if (history.isEmpty()) "История пуста" else "В истории только недоступные книги",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(24.dp),
-                    )
-                }
-            }
-        } else {
-            LazyColumn(
-                contentPadding = PaddingValues(vertical = 8.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                bookItems(
-                    books = visibleHistory,
-                    viewMode = viewMode,
-                    onBookClick = { book ->
-                        navController.navigate("book/${Uri.encode(app.bookCache.keyOf(book))}")
-                    },
-                    action = { book ->
-                        IconButton(onClick = {
-                            scope.launch {
-                                app.historyStore.remove(app.bookCache.keyOf(book))
-                            }
-                        }) {
-                            Icon(
-                                imageVector = Icons.Outlined.Delete,
-                                contentDescription = "Удалить из истории",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    },
-                )
             }
         }
     }

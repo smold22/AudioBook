@@ -58,21 +58,6 @@ class KnigaVuheSource(
             seriesIndex = seriesIndex,
             seriesUrl = seriesUrl,
         )
-        val related = doc.select("a.suggested_book").mapNotNull { card ->
-            val href = card.absUrl("href").takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            val title2 = card.selectFirst(".suggested_book_name")?.text()?.trim()
-                ?: return@mapNotNull null
-            val cover2 = card.selectFirst(".suggested_book_cover_img")?.attr("src").toNullIfBlank()
-            val author2 = card.selectFirst(".suggested_book_author_href")?.text().toNullIfBlank()
-            Book(
-                sourceId = id,
-                id = href,
-                title = title2,
-                url = href,
-                coverUrl = cover2,
-                author = author2,
-            )
-        }
         val seriesBooks = doc.select(".book_serie_block_item").mapNotNull { item ->
             val link = item.selectFirst("a") ?: return@mapNotNull null
             val href = link.absUrl("href").takeIf { it.isNotBlank() } ?: return@mapNotNull null
@@ -93,7 +78,6 @@ class KnigaVuheSource(
             book = book,
             description = description,
             tracks = parsePlayerTracks(html),
-            related = related,
             seriesBooks = seriesBooks,
         )
     }
@@ -158,8 +142,6 @@ class KnigaVuheSource(
             )
         }
     }
-
-    override fun supportsSeries(): Boolean = true
 
     override suspend fun seriesBooks(seriesUrl: String, page: Int): List<Book> {
         val target = if (page <= 1) seriesUrl else seriesUrl.trimEnd('/') + "/$page/"

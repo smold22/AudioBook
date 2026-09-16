@@ -118,8 +118,6 @@ class SlushatKnigiSource(
     override suspend fun seriesBooks(seriesUrl: String, page: Int): List<Book> =
         books(seriesUrl, page)
 
-    override fun supportsSeries(): Boolean = true
-
     override suspend fun genres(): List<Genre> {
         val doc = Jsoup.parse(getHtml(client, baseUrl), baseUrl)
         return doc.select("ul.header__menu-hidden li a[href]").mapNotNull { link ->

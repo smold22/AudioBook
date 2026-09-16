@@ -2,60 +2,55 @@ package com.yourapp.audiobook.ui
 
 import android.app.Application
 import androidx.lifecycle.viewModelScope
+import com.yourapp.audiobook.data.HomeGenre
 import com.yourapp.audiobook.source.api.Book
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-
-enum class HomeFeed(val label: String) {
-    HOME("Главная"),
-    NEW("Новинки"),
-}
 
 class HomeViewModel(app: Application) : BookListViewModel(app) {
 
-    private val _feed = MutableStateFlow(HomeFeed.HOME)
-    val feed: StateFlow<HomeFeed> = _feed.asStateFlow()
+    private val _newBooks = MutableStateFlow<List<Book>>(emptyList())
+    val newBooks: StateFlow<List<Book>> = _newBooks.asStateFlow()
 
-    private val _availableFeeds = MutableStateFlow(listOf(HomeFeed.HOME))
-    val availableFeeds: StateFlow<List<HomeFeed>> = _availableFeeds.asStateFlow()
+    private val _activeHomeGenres = MutableStateFlow<List<HomeGenre>>(emptyList())
+    val activeHomeGenres: StateFlow<List<HomeGenre>> = _activeHomeGenres.asStateFlow()
 
-    fun setFeed(newFeed: HomeFeed) {
-        if (newFeed == _feed.value) return
-        _feed.value = newFeed
-        refresh()
+    init {
+        refreshNewBooks()
+    }
+
+    override fun refresh() {
+        super.refresh()
+        refreshNewBooks()
     }
 
     override suspend fun currentSourceId(): String? = appContext.activeSource()?.id
 
-    override fun refreshForSource(sourceId: String?) {
-        _feed.value = HomeFeed.HOME
-        super.refreshForSource(sourceId)
-        viewModelScope.launch {
-            val source = appContext.activeSource()
-            val feeds = buildList {
-                add(HomeFeed.HOME)
-                if (source?.supportsNew() == true) add(HomeFeed.NEW)
-            }
-            _availableFeeds.value = feeds
-        }
-    }
-
     override suspend fun loadPage(page: Int): List<Book> {
         val source = appContext.activeSource() ?: return emptyList()
-        return when (_feed.value) {
-            HomeFeed.HOME -> {
-                val genre = appContext.settingsStore.homeGenre.first()
-                if (genre != null && genre.sourceId == source.id) {
-                    source.books(genre.url, page)
-                        .map { if (it.genre == null) it.copy(genre = genre.name) else it }
-                } else {
-                    source.home(page)
-                }
+        val genres = appContext.resolveHomeGenres()
+        _activeHomeGenres.value = genres
+        if (genres.isNotEmpty()) {
+            return coroutineScope {
+                genres.map { genre ->
+                    async {
+                        source.books(genre.url, page)
+                            .map { if (it.genre == null) it.copy(genre = genre.name) else it }
+                    }
+                }.awaitAll().flatten()
             }
-            HomeFeed.NEW -> source.newBooks(page)
+        }
+        return source.home(page)
+    }
+
+    private fun refreshNewBooks() {
+        viewModelScope.launch {
+            _newBooks.value = appContext.newBooksAll(1).distinctBy { "${it.sourceId}:${it.id}" }
         }
     }
 }

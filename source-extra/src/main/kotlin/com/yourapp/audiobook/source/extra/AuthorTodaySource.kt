@@ -105,8 +105,6 @@ class AuthorTodaySource(
         return parseBooks(getHtml(client, target))
     }
 
-    override fun supportsSeries(): Boolean = true
-
     override suspend fun seriesBooks(seriesUrl: String, page: Int): List<Book> =
         if (page <= 1) parseBooks(getHtml(client, seriesUrl)) else emptyList()
 

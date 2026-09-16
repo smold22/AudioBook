@@ -30,6 +30,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -81,9 +82,31 @@ class SyncManager(
     fun start() {
         if (started) return
         started = true
+        observeLocalChanges()
         currentUser()?.let {
             _state.update { s ->
                 s.copy(signedIn = true, accountEmail = it.email ?: s.accountEmail)
+            }
+        }
+    }
+
+    /**
+     * Записывает время каждого локального изменения данных/настроек.
+     * Без этого при синхронизации устаревшие данные из облака затирали бы
+     * свежие локальные правки (last-write-wins не мог определить победителя).
+     */
+    private fun observeLocalChanges() {
+        scope.launch {
+            merge(
+                favoritesStore.changes,
+                watchlistStore.changes,
+                historyStore.changes,
+                progressStore.changes,
+                bookmarksStore.changes,
+                settingsStore.changes,
+            ).collect {
+                if (_state.value.syncing || _state.value.restoring) return@collect
+                syncStateStore.recordChange()
             }
         }
     }
@@ -287,6 +310,7 @@ class SyncManager(
                 ?: throw IllegalStateException("Резервная копия не найдена")
             applyLocal(data)
             store.write(user.uid, data.copy(updatedAtMs = System.currentTimeMillis()))
+            syncStateStore.recordChange()
             _state.update {
                 it.copy(lastSyncAtMs = System.currentTimeMillis(), lastError = null)
             }
@@ -330,7 +354,10 @@ class SyncManager(
                 val currentLocal = snapshotLocal()
                 applyLocal(currentLocal.unionWith(merged))
             }
-            store.write(uid, merged)
+            store.write(uid, merged.copy(updatedAtMs = System.currentTimeMillis()))
+            // Локальная копия теперь равна облачной — фиксируем время,
+            // чтобы последующие правки этого устройства побеждали при слиянии.
+            syncStateStore.recordChange()
             _state.update {
                 it.copy(lastSyncAtMs = System.currentTimeMillis(), lastError = null)
             }

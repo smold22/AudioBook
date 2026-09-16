@@ -28,11 +28,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import com.yourapp.audiobook.AudioBookApplication
+import dev.chrisbanes.haze.hazeSource
 import java.text.NumberFormat
 
 @Composable
 fun GenresScreen(navController: NavHostController) {
     val app = LocalContext.current.applicationContext as AudioBookApplication
+    val haze = screenHaze()
     val viewModel: GenresViewModel = viewModel()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val sourceId by app.settingsStore.selectedSourceId.collectAsStateWithLifecycle(initialValue = null)
@@ -42,10 +44,11 @@ fun GenresScreen(navController: NavHostController) {
         viewModel.loadForSource(sourceId)
     }
 
-    LazyColumn(
-        contentPadding = PaddingValues(vertical = 8.dp),
-        modifier = Modifier.fillMaxSize(),
-    ) {
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            contentPadding = PaddingValues(top = GlassHeaderHeight + 8.dp, bottom = GlassBottomClearance),
+            modifier = Modifier.fillMaxSize().hazeSource(haze),
+        ) {
         if (state.genres.isEmpty() && state.loading) {
             item {
                 Box(
@@ -99,6 +102,16 @@ fun GenresScreen(navController: NavHostController) {
                     }
                 }
             }
+        }
+        }
+        GlassHeader(
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
+            Text(
+                "Жанры",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(start = 12.dp),
+            )
         }
     }
 }

@@ -25,7 +25,6 @@ data class BookDetails(
     val book: Book,
     val description: String? = null,
     val tracks: List<AudioTrack> = emptyList(),
-    val related: List<Book> = emptyList(),
     val seriesBooks: List<Book> = emptyList(),
     /** Ссылка на торрент-файл (для торрент-источников, у которых нет прямых MP3). */
     val torrentUrl: String? = null,
@@ -60,8 +59,6 @@ interface AudiobookSource {
 
     suspend fun seriesBooks(seriesUrl: String, page: Int): List<Book> = emptyList()
 
-    fun supportsSeries(): Boolean = false
-
     /** Источник распространяет книги через торрент (без прямых MP3-ссылок). */
     fun supportsTorrent(): Boolean = false
 
@@ -87,6 +84,4 @@ class SourceRegistry {
     }
 
     fun get(id: String): AudiobookSource? = _sources.firstOrNull { it.id == id }
-
-    fun default(): AudiobookSource? = _sources.firstOrNull()
 }

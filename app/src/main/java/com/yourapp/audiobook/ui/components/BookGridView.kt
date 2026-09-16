@@ -1,6 +1,8 @@
 package com.yourapp.audiobook.ui.components
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,7 +17,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,29 +35,31 @@ import coil3.compose.LocalPlatformContext
 import coil3.request.ImageRequest
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.source.api.Book
+import com.yourapp.audiobook.ui.isTvMode
 import com.yourapp.audiobook.ui.rememberAppImageLoader
 import com.yourapp.audiobook.ui.tvFocus
 
 /**
  * Выводит список книг в ленивом контейнере списком или сеткой
- * (в два столбца, либо в три — в горизонтальном режиме и на Android TV)
+ * (в [spanCount] столбцов в режиме сетки)
  * в зависимости от настройки «Вид».
  */
+@OptIn(ExperimentalFoundationApi::class)
 fun LazyListScope.bookItems(
     books: List<Book>,
     viewMode: String,
+    spanCount: Int,
     onBookClick: (Book) -> Unit,
     key: (Book) -> Any = { "${it.sourceId}:${it.id}" },
     action: (@Composable (Book) -> Unit)? = null,
 ) {
     if (viewMode == SettingsStore.VIEW_GRID || viewMode == SettingsStore.VIEW_GRID3) {
-        val columns = if (viewMode == SettingsStore.VIEW_GRID3) 3 else 2
-        val rows = books.chunked(columns)
+        val rows = books.chunked(spanCount)
         rows.forEachIndexed { rowIndex, row ->
             item(key = "grid-row-" + row.joinToString("|") { key(it).toString() }) {
                 BookGridRow(
                     books = row,
-                    prefetchBooks = books.drop((rowIndex + 1) * columns).take(PREFETCH_COUNT),
+                    prefetchBooks = books.drop((rowIndex + 1) * spanCount).take(PREFETCH_COUNT),
                     onBookClick = onBookClick,
                     action = action,
                 )
@@ -109,6 +116,7 @@ private fun BookGridRow(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun BookGridItem(
     book: Book,
@@ -117,9 +125,21 @@ private fun BookGridItem(
     action: (@Composable () -> Unit)? = null,
 ) {
     val imageLoader = rememberAppImageLoader()
+    val tvMode = isTvMode
+    var contextBook by remember { mutableStateOf<Book?>(null) }
     Column(
         modifier = modifier
-            .clickable(onClick = onClick)
+            .then(
+                if (tvMode) {
+                    Modifier.clickable(onClick = onClick)
+                } else {
+                    Modifier.combinedClickable(
+                        onClick = onClick,
+                        onLongClickLabel = "Действия книги",
+                        onLongClick = { contextBook = book },
+                    )
+                },
+            )
             .tvFocus()
             .padding(bottom = 8.dp),
     ) {
@@ -179,6 +199,9 @@ private fun BookGridItem(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+    }
+    if (!tvMode) {
+        BookContextMenu(contextBook) { contextBook = null }
     }
 }
 

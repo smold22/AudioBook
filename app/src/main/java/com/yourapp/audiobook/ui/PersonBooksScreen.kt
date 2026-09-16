@@ -5,9 +5,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
@@ -25,7 +28,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -34,6 +36,8 @@ import androidx.navigation.NavHostController
 import com.yourapp.audiobook.AudioBookApplication
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.ui.components.bookItems
+import dev.chrisbanes.haze.hazeSource
+import androidx.compose.ui.platform.LocalContext
 
 @Composable
 fun PersonBooksScreen(personName: String, mode: String, navController: NavHostController) {
@@ -43,10 +47,20 @@ fun PersonBooksScreen(personName: String, mode: String, navController: NavHostCo
         factory = PersonBooksViewModelFactory(app, personName, mode),
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val searchingIn by viewModel.searchingIn.collectAsStateWithLifecycle(initialValue = null)
     val listState = rememberLazyListState()
     val rawViewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
     // Сетка в 3 столбца доступна только в горизонтальном режиме и на Android TV.
     val viewMode = if (rawViewMode == SettingsStore.VIEW_GRID3 && !isLandscapeOrTv) SettingsStore.VIEW_GRID else rawViewMode
+    val uiMode by app.settingsStore.uiMode.collectAsStateWithLifecycle(initialValue = null)
+    val isTv = uiMode == SettingsStore.UI_MODE_TV
+    // Compute span count for grid layout based on view mode and TV mode
+    val spanCount = when {
+        viewMode == SettingsStore.VIEW_LIST -> 1
+        viewMode == SettingsStore.VIEW_GRID -> 2
+        viewMode == SettingsStore.VIEW_GRID3 -> if (isTv) 5 else 3
+        else -> 2 // default fallback
+    }
 
     val shouldLoadMore by remember {
         derivedStateOf {
@@ -67,21 +81,9 @@ fun PersonBooksScreen(personName: String, mode: String, navController: NavHostCo
     }
 
     val prefix = if (mode == "reader") "Чтец" else "Автор"
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = { navController.popBackStack() }) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
-            }
-            Text(
-                text = "$prefix: $personName",
-                style = MaterialTheme.typography.titleLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().hazeSource(screenHaze())) {
 
         if (state.books.isEmpty() && !state.loading && state.error == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -90,23 +92,33 @@ fun PersonBooksScreen(personName: String, mode: String, navController: NavHostCo
         } else {
             LazyColumn(
                 state = listState,
-                contentPadding = PaddingValues(vertical = 8.dp),
+                contentPadding = PaddingValues(top = GlassHeaderHeight + 4.dp, bottom = GlassBottomClearance),
                 modifier = Modifier.fillMaxSize(),
             ) {
                 bookItems(
                     books = state.books,
                     viewMode = viewMode,
+                    spanCount = spanCount,
                     onBookClick = { book ->
                         navController.navigate("book/${Uri.encode(app.bookCache.keyOf(book))}")
                     },
                 )
                 if (state.loading) {
-                    item {
-                        Box(
-                            modifier = Modifier.fillMaxWidth().padding(24.dp),
-                            contentAlignment = Alignment.Center,
+                    item(key = "searching") {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            CircularProgressIndicator()
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                text = searchingIn?.let { "Ищу в источнике: $it…" } ?: "Ищу…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                 }
@@ -124,6 +136,20 @@ fun PersonBooksScreen(personName: String, mode: String, navController: NavHostCo
                     }
                 }
             }
+        }
+        }
+        GlassHeader(
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
+            IconButton(onClick = { navController.popBackStack() }) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+            }
+            Text(
+                text = "$prefix: $personName",
+                style = MaterialTheme.typography.titleLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

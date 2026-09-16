@@ -27,6 +27,11 @@ class AknigXyzSource(
     override suspend fun home(page: Int): List<Book> =
         parseBooks(getHtml(client, if (page <= 1) baseUrl else "$baseUrl/page/$page/"))
 
+    override suspend fun newBooks(page: Int): List<Book> =
+        if (page <= 1) parseBooks(getHtml(client, "$baseUrl/lastnews/")) else emptyList()
+
+    override fun supportsNew(): Boolean = true
+
     override suspend fun search(query: String, page: Int): List<Book> {
         val url = "$baseUrl/index.php?do=search&subaction=search&story=${URLEncoder.encode(query, "UTF-8")}"
         return parseBooks(getHtml(client, url))

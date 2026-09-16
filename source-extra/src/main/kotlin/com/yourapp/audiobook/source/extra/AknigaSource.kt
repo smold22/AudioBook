@@ -1,4 +1,4 @@
-﻿package com.yourapp.audiobook.source.extra
+package com.yourapp.audiobook.source.extra
 
 import com.google.gson.JsonElement
 import com.google.gson.JsonParser
@@ -156,8 +156,6 @@ class AknigaSource(
             )
         }
     }
-
-    override fun supportsSeries(): Boolean = true
 
     override suspend fun seriesBooks(seriesUrl: String, page: Int): List<Book> {
         val target = if (page <= 1) seriesUrl else seriesUrl.trimEnd('/') + "/page$page/"

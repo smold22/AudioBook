@@ -12,20 +12,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yourapp.audiobook.data.SettingsStore
-import com.yourapp.audiobook.player.PlaybackService
 import com.yourapp.audiobook.ui.AppNavHost
 import com.yourapp.audiobook.ui.FocusBorderIndication
 import com.yourapp.audiobook.ui.LocalUiMode
 import com.yourapp.audiobook.ui.UpdateDialogs
 import com.yourapp.audiobook.ui.theme.AudioBookTheme
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
  * Маршрутизация между активностями: смартфон (вертикальная ориентация)
@@ -78,6 +71,7 @@ fun AppRoot(uiMode: String, onExitApp: () -> Unit) {
     val fontScale = when (fontMode) {
         SettingsStore.FONT_SMALL -> 0.85f
         SettingsStore.FONT_LARGE -> 1.2f
+        SettingsStore.FONT_VERY_LARGE -> 1.5f
         else -> 1f
     }
     val accentColor by settings.accentColor.collectAsStateWithLifecycle(initialValue = SettingsStore.ACCENT_DYNAMIC)
@@ -108,37 +102,3 @@ fun AppRoot(uiMode: String, onExitApp: () -> Unit) {
 }
 
 /** Продолжает прослушивание последней книги при запуске, если включено в настройках. */
-fun AudioBookApplication.resumeLastBookIfEnabled(scope: CoroutineScope, context: Context) {
-    scope.launch {
-        if (!settingsStore.resumeOnLaunch.first()) return@launch
-        if (playerController.nowPlaying.value != null) return@launch
-        val last = historyStore.snapshot().firstOrNull() ?: return@launch
-        val book = last.book
-        val source = sourceRegistry.get(book.sourceId) ?: return@launch
-        val details = withContext(Dispatchers.IO) {
-            runCatching { source.getBookDetails(book.url) }.getOrNull()
-        } ?: return@launch
-        if (details.tracks.isEmpty()) return@launch
-        val bookKey = "${book.sourceId}:${book.id}"
-        val progress = progressStore.load(bookKey)
-        val savedTrack = progress?.trackIndex ?: 0
-        val trackIndex = savedTrack.takeIf { it in details.tracks.indices } ?: 0
-        val positionMs = if (trackIndex == savedTrack) progress?.positionMs ?: 0L else 0L
-        val localUris = if (
-            downloadManager.isDownloaded(bookKey) ||
-            downloadManager.hasPartialTracks(bookKey)
-        ) {
-            val trackNames = details.tracks.mapIndexed { i, track ->
-                com.yourapp.audiobook.download.DownloadService.trackFileName(i, track)
-            }
-            downloadManager.offlineTrackUris(bookKey, trackNames)
-        } else {
-            null
-        }
-        playerController.play(details, trackIndex, positionMs, localUris)
-        ContextCompat.startForegroundService(
-            context,
-            Intent(context, PlaybackService::class.java),
-        )
-    }
-}

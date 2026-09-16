@@ -157,15 +157,20 @@ class DownloadService : Service() {
                 )
                 if (storage.exists(index, track)) {
                     done += 1
+                    manager.recordTrackDownloaded(bookKey, trackFileName(index, track))
                     manager.setState(
                         bookKey,
                         DownloadState(bookKey, DownloadStatus.DOWNLOADING, percent = overallPercent(done, total), tracksDone = done, tracksTotal = total),
                     )
                     continue
                 }
+                manager.setState(
+                    bookKey,
+                    DownloadState(bookKey, DownloadStatus.DOWNLOADING, percent = overallPercent(done, total), tracksDone = done, tracksTotal = total, trackIndex = index),
+                )
                 downloadTrackFile(httpClient, storage, index, track) { percent ->
                     val overall = if (total > 0) (done * 100 + percent) / total else 0
-                    manager.setState(bookKey, DownloadState(bookKey, DownloadStatus.DOWNLOADING, overall, done, total))
+                    manager.setState(bookKey, DownloadState(bookKey, DownloadStatus.DOWNLOADING, overall, done, total, trackIndex = index))
                     updateNotification(
                         title = "Скачивание книги",
                         text = "$bookTitle · трек ${index + 1} из $total · $overall%",
@@ -175,6 +180,7 @@ class DownloadService : Service() {
                     )
                 }
                 done += 1
+                manager.recordTrackDownloaded(bookKey, trackFileName(index, track))
                 manager.setState(
                     bookKey,
                     DownloadState(bookKey, DownloadStatus.DOWNLOADING, percent = overallPercent(done, total), tracksDone = done, tracksTotal = total),
@@ -246,7 +252,7 @@ class DownloadService : Service() {
         downloadTrackFile(httpClient, storage, trackIndex, track) { percent ->
             manager.setState(
                 bookKey,
-                DownloadState(bookKey, DownloadStatus.DOWNLOADING, percent = percent, tracksDone = 1, tracksTotal = 1),
+                DownloadState(bookKey, DownloadStatus.DOWNLOADING, percent = percent, tracksDone = 1, tracksTotal = 1, trackIndex = trackIndex),
             )
             updateNotification(
                 title = "Скачивание трека",
@@ -411,7 +417,7 @@ class DownloadService : Service() {
         }
         tempDir.deleteRecursively()
         val tracks = files.mapIndexed { index, (name, _) ->
-            AudioTrack(title = name.removeSuffix(".mp3"), url = name)
+            AudioTrack(title = name.removeSuffix(".mp3").replaceFirst(Regex("""^\d{2}\s*-\s*"""), ""), url = name)
         }
         manager.finishDownload(bookKey, folderRef, OfflineMeta.encode(details.copy(tracks = tracks)))
         updateNotification("Книга скачана", bookTitle, percent = 100, indeterminate = false, ongoing = false)
@@ -559,7 +565,7 @@ class DownloadService : Service() {
         fun partLength(index: Int, track: AudioTrack): Long {
             val name = fileName(index, track)
             if (bookDoc != null) {
-                return bookDoc.findFile("$name.part")?.length() ?: 0L
+                return findPart(name)?.length() ?: 0L
             }
             val dir = bookFile ?: return 0L
             return runCatching { File(dir, "$name.part").length() }.getOrDefault(0L)
@@ -568,7 +574,7 @@ class DownloadService : Service() {
         fun openOutput(index: Int, track: AudioTrack, append: Boolean): OutputStream {
             val name = fileName(index, track)
             if (bookDoc != null) {
-                val part = bookDoc.findFile("$name.part") ?: bookDoc.createFile("audio/mpeg", "$name.part")
+                val part = findPart(name) ?: bookDoc.createFile("audio/mpeg", "$name.part")
                 if (part == null) throw IOException("Не удалось создать файл в выбранной папке")
                 val mode = if (append) "wa" else "w"
                 return BufferedOutputStream(
@@ -583,7 +589,7 @@ class DownloadService : Service() {
 
         fun deletePart(index: Int, track: AudioTrack) {
             val name = fileName(index, track)
-            val doc = bookDoc?.findFile("$name.part")
+            val doc = findPart(name)
             if (doc != null) {
                 doc.delete()
                 return
@@ -595,7 +601,7 @@ class DownloadService : Service() {
         fun finishFile(index: Int, track: AudioTrack) {
             val name = fileName(index, track)
             if (bookDoc != null) {
-                val part = bookDoc.findFile("$name.part") ?: return
+                val part = findPart(name) ?: return
                 val existing = bookDoc.findFile(name)
                 if (existing != null) {
                     if (existing.length() == 0L) existing.delete() else { part.delete(); return }
@@ -613,6 +619,17 @@ class DownloadService : Service() {
             val part = File(dir, "$name.part")
             if (part.exists() && !part.renameTo(target)) {
                 throw IOException("Не удалось переименовать файл «$name»")
+            }
+        }
+
+        /** Ищет part-файл книги. Провайдер может дописать расширение по MIME (например, "...part.mp3"). */
+        private fun findPart(name: String): DocumentFile? {
+            val partName = "$name.part"
+            val exact = bookDoc?.findFile(partName)
+            if (exact != null) return exact
+            return bookDoc?.listFiles()?.firstOrNull { doc ->
+                val docName = doc.name ?: return@firstOrNull false
+                docName.startsWith(partName) && docName.length > partName.length
             }
         }
 

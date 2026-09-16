@@ -1,29 +1,39 @@
 package com.yourapp.audiobook
 
 import android.app.Application
+import android.content.Intent
 import android.net.Uri
+import androidx.core.content.ContextCompat
 import coil3.ImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import okhttp3.OkHttpClient
 import com.yourapp.audiobook.data.BookCache
+import com.yourapp.audiobook.data.BookDescriptionStore
 import com.yourapp.audiobook.data.BackupManager
 import com.yourapp.audiobook.data.BookmarksStore
 import com.yourapp.audiobook.data.DeadBooksStore
 import com.yourapp.audiobook.data.EqualizerStore
 import com.yourapp.audiobook.data.FavoritesStore
 import com.yourapp.audiobook.data.HistoryStore
+import com.yourapp.audiobook.data.HomeGenre
 import com.yourapp.audiobook.data.ProgressStore
+import com.yourapp.audiobook.data.SearchHistoryStore
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.data.SourceCooldown
+import com.yourapp.audiobook.data.SourceHealthTracker
+import com.yourapp.audiobook.data.SourcesSimilarProvider
 import com.yourapp.audiobook.data.WatchlistStore
 import com.yourapp.audiobook.data.sync.SyncManager
 import com.yourapp.audiobook.download.DownloadManager
 import com.yourapp.audiobook.player.PlayerController
+import com.yourapp.audiobook.player.PlaybackService
 import com.yourapp.audiobook.player.stripRefParam
 import com.yourapp.audiobook.source.api.AudiobookSource
 import com.yourapp.audiobook.source.api.Book
+import com.yourapp.audiobook.source.api.BookDetails
 import com.yourapp.audiobook.source.api.SourceRegistry
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
@@ -41,7 +51,6 @@ import com.yourapp.audiobook.source.extra.AudioknigiTopSource
 import com.yourapp.audiobook.source.extra.AudioknigaOneSource
 import com.yourapp.audiobook.source.extra.AudioknigiProSource
 import com.yourapp.audiobook.source.extra.AudiomirSource
-import com.yourapp.audiobook.source.extra.AumeSource
 import com.yourapp.audiobook.source.extra.BazaKnigSource
 import com.yourapp.audiobook.source.extra.BookZvukSource
 import com.yourapp.audiobook.source.extra.BookishSource
@@ -63,6 +72,7 @@ import com.yourapp.audiobook.update.UpdateManager
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 class AudioBookApplication : Application() {
@@ -91,13 +101,19 @@ class AudioBookApplication : Application() {
         private set
     lateinit var bookCache: BookCache
         private set
+    lateinit var descriptionCache: BookDescriptionStore
+        private set
     lateinit var progressStore: ProgressStore
         private set
     lateinit var deadBooksStore: DeadBooksStore
         private set
-    lateinit var sourceCooldown: SourceCooldown
+lateinit var sourceCooldown: SourceCooldown
         private set
-    lateinit var settingsStore: SettingsStore
+    lateinit var sourceHealth: SourceHealthTracker
+        private set
+lateinit var settingsStore: SettingsStore
+        private set
+    lateinit var searchHistory: SearchHistoryStore
         private set
     lateinit var downloadManager: DownloadManager
         private set
@@ -107,11 +123,13 @@ class AudioBookApplication : Application() {
         private set
     lateinit var watchlistStore: WatchlistStore
         private set
-    lateinit var historyStore: HistoryStore
+lateinit var historyStore: HistoryStore
         private set
     lateinit var bookmarksStore: BookmarksStore
         private set
     lateinit var equalizerStore: EqualizerStore
+        private set
+    lateinit var similarBooks: SourcesSimilarProvider
         private set
     lateinit var syncManager: SyncManager
         private set
@@ -122,7 +140,96 @@ class AudioBookApplication : Application() {
     lateinit var updateManager: UpdateManager
         private set
 
-    suspend fun activeSource(): AudiobookSource? {
+    /** Область приложения: корутины, переживающие уничтожение активностей. */
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /** Защита от повторного возобновления прослушивания в рамках одного процесса. */
+    private var resumeAttempted = false
+
+    /** Кеш жанров главного экрана: источник -> (выбранные названия, результат). */
+    private val homeGenreCache = mutableMapOf<String, Pair<List<String>, List<HomeGenre>>>()
+
+    /**
+     * Продолжает прослушивание последней книги при запуске, если включено в настройках.
+     * Работает в области приложения, поэтому не отменяется при уничтожении [LauncherActivity].
+     */
+    fun resumeLastBookIfEnabled() {
+        if (resumeAttempted) return
+        resumeAttempted = true
+        applicationScope.launch {
+            if (!settingsStore.resumeOnLaunch.first()) return@launch
+            if (playerController.nowPlaying.value != null) return@launch
+            val last = historyStore.snapshot().firstOrNull() ?: return@launch
+            resumeBook(last.book)
+        }
+    }
+
+    /**
+     * Загружает детали книги (офлайн-копии или из источника) и продолжает
+     * воспроизведение с сохранённой позиции. Используется для возобновления
+     * последней книги и для воспроизведения следующей книги серии.
+     */
+    private suspend fun resumeBook(book: Book) {
+        val bookKey = "${book.sourceId}:${book.id}"
+        val offlineDetails = withContext(Dispatchers.IO) {
+            runCatching { downloadManager.offlineDetails(bookKey) }.getOrNull()
+        }
+        val details = if (offlineDetails != null && offlineDetails.tracks.isNotEmpty()) {
+            offlineDetails
+        } else {
+            val source = sourceRegistry.get(book.sourceId) ?: return
+            withContext(Dispatchers.IO) {
+                runCatching { source.getBookDetails(book.url) }.getOrNull()
+            } ?: return
+        }
+        if (details.tracks.isEmpty()) return
+        val progress = progressStore.load(bookKey)
+        val savedTrack = progress?.trackIndex ?: 0
+        val trackIndex = savedTrack.takeIf { it in details.tracks.indices } ?: 0
+        val positionMs = if (trackIndex == savedTrack) progress?.positionMs ?: 0L else 0L
+        val localUris = withContext(Dispatchers.IO) {
+            val trackNames = com.yourapp.audiobook.download.trackFileNames(details)
+            downloadManager.offlineTrackUris(bookKey, trackNames)
+        }
+        playerController.play(details, trackIndex, positionMs, localUris)
+        ContextCompat.startForegroundService(
+            this@AudioBookApplication,
+            Intent(this@AudioBookApplication, PlaybackService::class.java),
+        )
+    }
+
+    /**
+     * Следующая книга серии (цикла): сначала список серии из деталей книги,
+     * при неполноте — постраничный список серии с сайта источника.
+     */
+    private suspend fun nextSeriesBook(details: BookDetails): Book? {
+        val current = details.book
+        val ordered = details.seriesBooks.sortedWith(compareBy { it.seriesIndex ?: Int.MAX_VALUE })
+        val detailIdx = ordered.indexOfFirst { it.id == current.id }
+        if (detailIdx >= 0) {
+            ordered.getOrNull(detailIdx + 1)?.let { return it }
+        }
+        val seriesUrl = current.seriesUrl ?: return null
+        val source = sourceRegistry.get(current.sourceId) ?: return null
+        var page = 1
+        var currentSeen = false
+        while (page <= SERIES_MAX_PAGES) {
+            val books = runCatching { source.seriesBooks(seriesUrl, page) }.getOrNull() ?: return null
+            if (books.isEmpty()) return null
+            val idx = books.indexOfFirst { it.id == current.id }
+            if (idx >= 0) {
+                books.getOrNull(idx + 1)?.let { return it }
+                if (currentSeen) return null
+                currentSeen = true
+            } else if (currentSeen) {
+                return books.firstOrNull()
+            }
+            page++
+        }
+        return null
+    }
+
+suspend fun activeSource(): AudiobookSource? {
         val hidden = settingsStore.hiddenSourceIds()
         val selectedId = settingsStore.currentSourceId()
         if (selectedId != null && selectedId !in hidden) {
@@ -130,6 +237,64 @@ class AudioBookApplication : Application() {
         }
         return sourceRegistry.sources.firstOrNull { it.id !in hidden }
     }
+
+    /**
+     * Новинки со всех источников, поддерживающих [AudiobookSource.supportsNew].
+     * Каждый источник обрабатывается изолированно: сбой одного не отменяет остальные.
+     */
+    suspend fun newBooksAll(page: Int): List<Book> {
+        val sources = sourceRegistry.sources.filter { it.supportsNew() }
+        if (sources.isEmpty()) return emptyList()
+        return coroutineScope {
+            sources.map { source ->
+                async {
+                    try {
+                        source.newBooks(page)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                }
+            }.awaitAll().flatten()
+        }
+    }
+
+    /**
+     * Жанры главного экрана, пересчитанные для текущего источника.
+     * Выбранные по названию жанры применяются и после смены источника:
+     * если в новом источнике есть жанр с таким же названием, используется его ссылка;
+     * если такого жанра нет — жанр пропускается (и тогда на главном «Все книги»).
+     */
+    suspend fun resolveHomeGenres(): List<HomeGenre> {
+        val selected = settingsStore.homeGenres.first()
+        if (selected.isEmpty()) {
+            homeGenreCache.clear()
+            return emptyList()
+        }
+        val source = activeSource() ?: return emptyList()
+        val names = selected.map { normalizeGenreName(it.name) }.distinct().sorted()
+        homeGenreCache[source.id]?.let { (cachedNames, result) ->
+            if (cachedNames == names) return result
+        }
+        val storedForSource = selected.filter { it.sourceId == source.id }
+        val resolved = if (storedForSource.size == names.size) {
+            storedForSource
+        } else {
+            val genreList = runCatching { source.genres() }.getOrNull()
+            if (genreList == null) {
+                return emptyList()
+            }
+            names.mapNotNull { name ->
+                genreList.firstOrNull { normalizeGenreName(it.name) == name }
+            }.map { HomeGenre(source.id, it.url, it.name) }
+        }
+        homeGenreCache[source.id] = names to resolved
+        return resolved
+    }
+
+    fun normalizeGenreName(name: String): String =
+        name.trim().replace(Regex("\\s+"), " ").lowercase()
 
     suspend fun searchAll(query: String, page: Int): List<Book> = coroutineScope {
         val hidden = settingsStore.hiddenSourceIds()
@@ -150,9 +315,11 @@ class AudioBookApplication : Application() {
         return message.contains("HTTP 400") || message.contains("HTTP 403") || message.contains("HTTP 429")
     }
 
-    private companion object {
+private companion object {
         const val SEARCH_SOURCE_TIMEOUT_MS = 25_000L
         const val MAX_RESULTS_PER_SOURCE = 10
+        /** Максимум страниц серии, которые просматриваются в поиске следующей книги. */
+        const val SERIES_MAX_PAGES = 20
     }
 
 override fun onCreate() {
@@ -161,7 +328,6 @@ override fun onCreate() {
 sourceRegistry = SourceRegistry().apply {
             register(IziBukSource())
             register(KnigaVuheSource())
-            register(AumeSource())
             register(AknigaSource())
             register(BazaKnigSource())
             register(KnigobludSource())
@@ -190,11 +356,14 @@ sourceRegistry = SourceRegistry().apply {
             register(KnigiAudioNetSource())
             register(AudioknigiOnlainSource())
         }
-        bookCache = BookCache()
+bookCache = BookCache()
+        descriptionCache = BookDescriptionStore(this)
         progressStore = ProgressStore(this)
         deadBooksStore = DeadBooksStore(this)
         sourceCooldown = SourceCooldown()
-        settingsStore = SettingsStore(this)
+        sourceHealth = SourceHealthTracker()
+settingsStore = SettingsStore(this)
+        searchHistory = SearchHistoryStore(this)
         downloadManager = DownloadManager(this, settingsStore)
         torrentManager = TorrentManager(this)
         updateManager = UpdateManager(this)
@@ -204,6 +373,7 @@ watchlistStore = WatchlistStore(this)
         historyStore = HistoryStore(this)
         bookmarksStore = BookmarksStore(this)
         equalizerStore = EqualizerStore(this)
+        similarBooks = SourcesSimilarProvider(this)
 syncManager = SyncManager(
             this,
             favoritesStore,
@@ -215,7 +385,16 @@ syncManager = SyncManager(
         )
 syncManager.start()
         playerController = PlayerController(this, historyStore, progressStore, bookmarksStore, equalizerStore, settingsStore)
+        playerController.nextSeriesBookProvider = { details -> nextSeriesBook(details) }
+        playerController.playBook = { book -> resumeBook(book) }
         selfHealIconState()
+        applicationScope.launch {
+            settingsStore.homeGenres.collect { homeGenreCache.clear() }
+        }
+        // Фоновая проверка работоспособности источников при каждом старте.
+        applicationScope.launch {
+            sourceHealth.checkAllSequentially(sourceRegistry.sources)
+        }
     }
 
     /** Восстанавливает корректное состояние компонентов иконки лаунчера при старте. */

@@ -31,7 +31,7 @@ class KnigobludSource(
         val html = getHtml(client, url)
         val doc = Jsoup.parse(html, url)
         val title = doc.selectFirst("h1")?.text()?.trim() ?: ""
-        val cover = doc.getElementById("BookCoverImage")?.attr("src").toNullIfBlank()
+        val cover = doc.getElementById("BookCoverImage")?.absUrl("src").toNullIfBlank()
         val description = doc.selectFirst(".BookDescriptionContent")?.ownText().toNullIfBlank()
         val durationText = doc.selectFirst(".PageTitle_Subtitle")?.ownText()?.toNullIfBlank()
 
@@ -137,8 +137,9 @@ class KnigobludSource(
                 .filter { it.previousElementSibling()?.text()?.contains("\uD83D\uDCD5") == true }
                 .joinToString(", ") { it.text() }.toNullIfBlank()
             val duration = item.selectFirst(".bookListItemNameDur")?.text().toNullIfBlank()
-            val coverUrl = (item.selectFirst(".bookListItemCoverImg, .bookListItemCover img")?.attr("data-img")
-                ?: item.selectFirst(".bookListItemCoverImg, .bookListItemCover img")?.attr("src")).toNullIfBlank()
+            val coverUrl = item.selectFirst(".bookListItemCoverImg, .bookListItemCover img")
+                ?.let { el -> if (el.hasAttr("data-img")) el.absUrl("data-img") else el.absUrl("src") }
+                .toNullIfBlank()
             if (title.isBlank()) return@mapNotNull null
             Book(
                 sourceId = id,

@@ -45,7 +45,7 @@ class AudioknigaLifeSource(
         val title = doc.selectFirst("h1.title_item")?.text()?.trim() ?: ""
         val cover = doc.selectFirst(".poster_item img")
             ?.attr("data-src")?.ifBlank { doc.selectFirst(".poster_item img")?.attr("src") }
-            .toNullIfBlank()
+            .toAbsoluteUrl()
         val author = statValue(doc, "Автор")
         val reader = statValue(doc, "Читает")
         val genre = statValue(doc, "Жанр")
@@ -84,8 +84,6 @@ class AudioknigaLifeSource(
         return parseBooks(getHtml(client, target))
     }
 
-    override fun supportsSeries(): Boolean = true
-
     override suspend fun seriesBooks(seriesUrl: String, page: Int): List<Book> =
         books(seriesUrl, page)
 
@@ -116,8 +114,9 @@ class AudioknigaLifeSource(
             val name = item.selectFirst(".bookitem_name a")?.text()?.trim()
                 ?: link.text().trim()
             if (name.isBlank()) return@mapNotNull null
-            val cover = item.selectFirst("a.short-img img")
-                ?.attr("data-src")?.ifBlank { item.selectFirst("a.short-img img")?.attr("src") }
+val cover = item.selectFirst("a.short-img img")
+            ?.attr("data-src")?.ifBlank { item.selectFirst("a.short-img img")?.attr("src") }
+            .toAbsoluteUrl()
             val author = metaBlock(item, "icon_author")?.select("a")?.eachText()?.joinToString(", ")
             val reader = metaBlock(item, "icon_reader")?.select("a")?.eachText()?.joinToString(", ")
             val genre = item.selectFirst(".bookitem_genre a")?.text().toNullIfBlank()
@@ -131,7 +130,7 @@ class AudioknigaLifeSource(
                 id = href,
                 title = name,
                 url = href,
-                coverUrl = cover.toNullIfBlank(),
+                coverUrl = cover,
                 author = author.toNullIfBlank(),
                 reader = reader.toNullIfBlank(),
                 durationText = duration,
@@ -144,6 +143,11 @@ class AudioknigaLifeSource(
 
     private fun metaBlock(item: org.jsoup.nodes.Element, iconClass: String): org.jsoup.nodes.Element? =
         item.selectFirst(".bookitem_meta_block.icon_$iconClass")
+
+    /** Превращает относительный путь обложки (/uploads/...) в абсолютный URL. */
+    private fun String?.toAbsoluteUrl(): String? = this?.takeIf { it.isNotBlank() }?.let {
+        if (it.startsWith("http")) it else baseUrl.trimEnd('/') + "/" + it.trimStart('/')
+    }
 
     private fun statValue(doc: org.jsoup.nodes.Document, label: String): String? =
         doc.select(".full-news-stats .fstat-item").firstOrNull { item ->

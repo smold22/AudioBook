@@ -16,7 +16,7 @@ class BookZvukSource(
 
     override val id = "book_zvuk"
     override val name = "Бук-звук"
-    override val baseUrl = "https://book-zvuk.ru"
+    override val baseUrl = "https://book-zvuk.com"
 
     override fun urlForId(bookId: String): String =
         if (bookId.startsWith("http")) bookId else baseUrl + bookId
@@ -35,7 +35,7 @@ class BookZvukSource(
         val title = author?.let { stripAuthor(rawTitle, it) } ?: rawTitle
         val reader = doc.selectFirst("a[href*=/performer/]")?.text().toNullIfBlank()
         val genre = doc.selectFirst("a[href*=/section/]")?.text().toNullIfBlank()
-        val cover = doc.selectFirst(".abook-left > img")?.attr("src").toNullIfBlank()
+        val cover = doc.selectFirst(".abook-left > img")?.attr("src").toNullIfBlank()?.withWorkingHost()
         val description = doc.selectFirst(".descriptiontext")?.text().toNullIfBlank()
 
         val book = Book(
@@ -83,7 +83,7 @@ class BookZvukSource(
             val title = author?.let { stripAuthor(rawTitle, it) } ?: rawTitle
             val reader = item.selectFirst(".a-info-item a[href*=/site/performer]")?.text().toNullIfBlank()
             val genre = item.selectFirst(".book_snippet_genre1")?.text().toNullIfBlank()
-            val cover = item.selectFirst(".b-showshort__cover_image")?.attr("src").toNullIfBlank()
+            val cover = item.selectFirst(".b-showshort__cover_image")?.attr("src").toNullIfBlank()?.withWorkingHost()
             Book(
                 sourceId = id,
                 id = href,
@@ -146,4 +146,8 @@ class BookZvukSource(
 
     private fun stripAuthor(name: String, author: String): String =
         name.removePrefix("$author - ").removePrefix("$author -").trim()
+
+    /** Сайт переехал с book-zvuk.ru на book-zvuk.com; старые ссылки на обложки ведут на мёртвый домен. */
+    private fun String.withWorkingHost(): String =
+        replace("https://book-zvuk.ru", baseUrl)
 }

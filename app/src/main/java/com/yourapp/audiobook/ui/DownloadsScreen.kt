@@ -10,15 +10,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,6 +44,7 @@ import com.yourapp.audiobook.data.AuthorGender
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.source.api.Book
 import com.yourapp.audiobook.ui.components.bookItems
+import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -69,7 +68,8 @@ class DownloadsViewModel(app: Application) : AndroidViewModel(app) {
             combine(
                 appContext.downloadManager.downloadedBooks,
                 appContext.downloadManager.downloadedTracks,
-            ) { books, tracks ->
+                appContext.downloadManager.metaVersion,
+            ) { books, tracks, _ ->
                 val keys = books.keys + tracks.keys
                 keys.mapNotNull { bookKey ->
                     runCatching { appContext.downloadManager.offlineDetails(bookKey) }.getOrNull()
@@ -97,6 +97,15 @@ fun DownloadsScreen(navController: NavHostController) {
     val rawViewMode by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
     // Сетка в 3 столбца доступна только в горизонтальном режиме и на Android TV.
     val viewMode = if (rawViewMode == SettingsStore.VIEW_GRID3 && !isLandscapeOrTv) SettingsStore.VIEW_GRID else rawViewMode
+    val uiMode by app.settingsStore.uiMode.collectAsStateWithLifecycle(initialValue = null)
+    val isTv = uiMode == SettingsStore.UI_MODE_TV
+    // Compute span count for grid layout based on view mode and TV mode
+    val spanCount = when {
+        viewMode == SettingsStore.VIEW_LIST -> 1
+        viewMode == SettingsStore.VIEW_GRID -> 2
+        viewMode == SettingsStore.VIEW_GRID3 -> if (isTv) 5 else 3
+        else -> 2 // default fallback
+    }
     var pendingDelete by remember { mutableStateOf<DownloadedEntry?>(null) }
     val visibleItems = remember(items, hideFemaleAuthors) {
         AuthorGender.filterFemale(items.map { it.book }, hideFemaleAuthors)
@@ -122,32 +131,46 @@ fun DownloadsScreen(navController: NavHostController) {
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Загрузки", style = MaterialTheme.typography.titleLarge)
-        }
-        HorizontalDivider()
+    val haze = screenHaze()
+
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().hazeSource(haze)) {
 
         if (items.isEmpty() || visibleItems.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    if (items.isEmpty()) "Нет скачанных книг" else "Все скачанные книги скрыты фильтром",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(24.dp),
-                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        if (items.isEmpty()) "Нет скачанных книг" else "Все скачанные книги скрыты фильтром",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(24.dp),
+                    )
+                    if (items.isEmpty()) {
+                        androidx.compose.material3.TextButton(onClick = {
+                            app.downloadManager.scanCurrentFolder { count ->
+                                val message = when {
+                                    count == 0 -> "Книг в папке не найдено"
+                                    count == 1 -> "Найдена 1 книга"
+                                    else -> "Найдено книг: $count"
+                                }
+                                android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }) {
+                            Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
+                            Text("Сканировать папку")
+                        }
+                    }
+                }
             }
         } else {
             LazyColumn(
-                contentPadding = PaddingValues(vertical = 8.dp),
+                contentPadding = PaddingValues(top = GlassHeaderHeight + 4.dp, bottom = GlassBottomClearance),
                 modifier = Modifier.fillMaxSize(),
             ) {
                 bookItems(
                     books = visibleItems,
                     viewMode = viewMode,
+                    spanCount = spanCount,
                     onBookClick = { book ->
                         navController.navigate("book/${Uri.encode(app.bookCache.keyOf(book))}")
                     },
@@ -187,6 +210,24 @@ fun DownloadsScreen(navController: NavHostController) {
                     }
                 },
             )
+        }
+        }
+        GlassHeader(
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
+            Text("Загрузки", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f).padding(start = 12.dp))
+            IconButton(onClick = {
+                app.downloadManager.scanCurrentFolder { count ->
+                    val message = when {
+                        count == 0 -> "Книг в папке не найдено"
+                        count == 1 -> "Найдена 1 книга"
+                        else -> "Найдено книг: $count"
+                    }
+                    android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }) {
+                Icon(Icons.Filled.Refresh, contentDescription = "Сканировать папку", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }

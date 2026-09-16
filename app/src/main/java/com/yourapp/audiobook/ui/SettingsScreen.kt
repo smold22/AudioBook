@@ -39,7 +39,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Tv
@@ -48,23 +47,19 @@ import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material.icons.outlined.FilterAltOff
-import androidx.compose.material.icons.outlined.Hearing
 import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.PersonOff
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Send
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.ViewModule
-import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
+
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -93,7 +88,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
@@ -105,11 +99,12 @@ import com.yourapp.audiobook.R
 import com.yourapp.audiobook.UiModeRouter
 import com.yourapp.audiobook.data.HomeGenre
 import com.yourapp.audiobook.data.IgnoreSection
-import com.yourapp.audiobook.data.LogCollector
+
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.source.api.Genre
 import com.yourapp.audiobook.ui.theme.AccentPalettes
 import com.yourapp.audiobook.update.UpdateStatus
+import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -138,12 +133,14 @@ private val accentOptions = listOf(
 private val viewOptions = listOf(
     SettingsStore.VIEW_LIST to "Список",
     SettingsStore.VIEW_GRID to "Сетка в 2 столбца",
+    SettingsStore.VIEW_GRID3 to "Сетка в 3 столбца",
 )
 
 private val fontOptions = listOf(
     SettingsStore.FONT_SMALL to "Маленький",
     SettingsStore.FONT_MEDIUM to "Средний",
     SettingsStore.FONT_LARGE to "Большой",
+    SettingsStore.FONT_VERY_LARGE to "Очень большой",
 )
 
 private val underlayOptions = listOf(
@@ -153,102 +150,6 @@ private val underlayOptions = listOf(
 )
 
 private enum class BackupAction { BACKUP, RESTORE }
-
-@Composable
-private fun IgnoreListRow(
-    label: String,
-    subtitle: String,
-    icon: @Composable () -> Unit,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .tvFocus()
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyLarge)
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        icon()
-    }
-}
-
-@Composable
-private fun IgnoreListDialog(
-    section: IgnoreSection,
-    items: Set<String>,
-    onAdd: (String) -> Unit,
-    onRemove: (String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var input by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Скрывать ${section.label.lowercase()}") },
-        text = {
-            Column(Modifier.fillMaxWidth()) {
-                if (items.isEmpty()) {
-                    Text(
-                        "Список пуст",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    items.forEach { item ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(item, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                            IconButton(onClick = { onRemove(item) }) {
-                                Icon(Icons.Filled.Close, contentDescription = "Убрать из списка")
-                            }
-                        }
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    OutlinedTextField(
-                        value = input,
-                        onValueChange = { input = it },
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text("Название") },
-                        singleLine = true,
-                    )
-                    TextButton(onClick = {
-                        if (input.isNotBlank()) {
-                            onAdd(input)
-                            input = ""
-                        }
-                    }) {
-                        Text("Добавить")
-                    }
-                }
-                Text(
-                    "Совпадение по части названия, без учёта регистра",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Готово")
-            }
-        },
-    )
-}
 
 @Composable
 fun SettingsScreen(navController: NavHostController) {
@@ -267,27 +168,20 @@ fun SettingsScreen(navController: NavHostController) {
     var showFontDialog by remember { mutableStateOf(false) }
     var showUnderlayDialog by remember { mutableStateOf(false) }
     var showUiModeDialog by remember { mutableStateOf(false) }
-    var showSourcesDialog by remember { mutableStateOf(false) }
     var showRestoreConfirm by remember { mutableStateOf(false) }
     var pendingRestorePath by remember { mutableStateOf<String?>(null) }
     var backupBusy by remember { mutableStateOf(false) }
     var backupMessage by remember { mutableStateOf<String?>(null) }
-    var logsBusy by remember { mutableStateOf(false) }
-    var logsMessage by remember { mutableStateOf<String?>(null) }
     var pendingAction by remember { mutableStateOf<BackupAction?>(null) }
-    var ignoreSection by remember { mutableStateOf<IgnoreSection?>(null) }
+    var showHiddenGenresDialog by remember { mutableStateOf(false) }
     val ignoredGenres by app.settingsStore.ignoredFlow(IgnoreSection.GENRE)
         .collectAsStateWithLifecycle(initialValue = emptySet())
-    val ignoredAuthors by app.settingsStore.ignoredFlow(IgnoreSection.AUTHOR)
-        .collectAsStateWithLifecycle(initialValue = emptySet())
-    val ignoredReaders by app.settingsStore.ignoredFlow(IgnoreSection.READER)
-        .collectAsStateWithLifecycle(initialValue = emptySet())
-    val hiddenSources by app.settingsStore.hiddenSources.collectAsStateWithLifecycle(initialValue = emptySet())
     val themeMode by app.settingsStore.themeMode.collectAsStateWithLifecycle(initialValue = SettingsStore.THEME_SYSTEM)
     val accentColor by app.settingsStore.accentColor.collectAsStateWithLifecycle(initialValue = SettingsStore.ACCENT_DYNAMIC)
     val appIcon by app.settingsStore.appIcon.collectAsStateWithLifecycle(initialValue = SettingsStore.APP_ICON_DEFAULT)
     val customAccentHex by app.settingsStore.customAccentColor.collectAsStateWithLifecycle(initialValue = null)
     val uiMode by app.settingsStore.uiMode.collectAsStateWithLifecycle(initialValue = SettingsStore.UI_MODE_AUTO)
+    val isTvMode = uiMode == SettingsStore.UI_MODE_TV
     val resumeOnLaunch by app.settingsStore.resumeOnLaunch.collectAsStateWithLifecycle(initialValue = false)
     val openPlayerOnLaunch by app.settingsStore.openPlayerOnLaunch.collectAsStateWithLifecycle(initialValue = false)
     val viewModeRaw by app.settingsStore.viewMode.collectAsStateWithLifecycle(initialValue = SettingsStore.VIEW_LIST)
@@ -297,7 +191,7 @@ fun SettingsScreen(navController: NavHostController) {
     val tvDevice = remember(context) { UiModeRouter.isTvDevice(context) }
     val viewMode = if (viewModeRaw == SettingsStore.VIEW_GRID3 && !wideView) SettingsStore.VIEW_GRID else viewModeRaw
     val hideTabLabels by app.settingsStore.hideTabLabels.collectAsStateWithLifecycle(initialValue = false)
-    val homeGenre by app.settingsStore.homeGenre.collectAsStateWithLifecycle(initialValue = null)
+    val homeGenres by app.settingsStore.homeGenres.collectAsStateWithLifecycle(initialValue = emptyList())
     val fontMode by app.settingsStore.fontScale.collectAsStateWithLifecycle(initialValue = SettingsStore.FONT_MEDIUM)
     val tabUnderlayHeight by app.settingsStore.tabUnderlayHeight.collectAsStateWithLifecycle(initialValue = SettingsStore.TAB_UNDERLAY_DEFAULT)
     val hideFemaleAuthors by app.settingsStore.hideFemaleAuthors.collectAsStateWithLifecycle(initialValue = false)
@@ -316,6 +210,14 @@ fun SettingsScreen(navController: NavHostController) {
             val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             runCatching { context.contentResolver.takePersistableUriPermission(uri, flags) }
             scope.launch { app.settingsStore.setDownloadFolder(uri.toString()) }
+            app.downloadManager.scanFolder(uri.toString()) { count ->
+                val message = when {
+                    count == 0 -> "Книг в папке не найдено"
+                    count == 1 -> "Найдена 1 книга"
+                    else -> "Найдено книг: $count"
+                }
+                android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -503,52 +405,17 @@ fun SettingsScreen(navController: NavHostController) {
         else -> accentOptions.firstOrNull { it.first == accentColor }?.second
             ?: accentOptions.first().second
     }
-    val viewLabel = viewOptions.firstOrNull { it.first == viewMode }?.second ?: "Список"
+    val viewLabel = when {
+        viewMode == SettingsStore.VIEW_GRID && isTvMode -> "Сетка в 2 столбца"
+        viewMode == SettingsStore.VIEW_GRID3 && isTvMode -> "Столбцы"
+        else -> viewOptions.firstOrNull { it.first == viewMode }?.second ?: "Список"
+   }
     val fontLabel = fontOptions.firstOrNull { it.first == fontMode }?.second ?: "Средний"
     val underlayLabel = underlayOptions.firstOrNull { it.first == tabUnderlayHeight }?.second ?: "Стандартная"
     val uiModeLabel = when (uiMode) {
         SettingsStore.UI_MODE_TV -> "Android TV (пульт ДУ)"
         SettingsStore.UI_MODE_TOUCH -> "Сенсорный экран"
         else -> "Авто (по типу устройства)"
-    }
-
-    fun sendLogs() {
-        if (logsBusy) return
-        logsBusy = true
-        logsMessage = null
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching { LogCollector.collect(context) }
-            }
-            logsBusy = false
-            result.onSuccess { file ->
-                val uri = FileProvider.getUriForFile(
-                    context,
-                    "${context.packageName}.fileprovider",
-                    file,
-                )
-                val version = runCatching {
-                    context.packageManager.getPackageInfo(context.packageName, 0).versionName
-                }.getOrNull() ?: "?"
-                val intent = Intent(Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(Intent.EXTRA_EMAIL, arrayOf("vlasov5020@gmail.com"))
-                    putExtra(Intent.EXTRA_SUBJECT, "Логи AudioBook v$version")
-                    putExtra(Intent.EXTRA_STREAM, uri)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                runCatching {
-                    context.startActivity(Intent.createChooser(intent, "Отправить логи").apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    })
-                    logsMessage = "Логи собраны — выберите приложение для отправки"
-                }.onFailure {
-                    logsMessage = "Не удалось открыть отправку: ${it.message}"
-                }
-            }.onFailure {
-                logsMessage = "Ошибка сбора логов: ${it.message}"
-            }
-        }
     }
 
     fun restoreNow(path: String) {
@@ -569,18 +436,16 @@ fun SettingsScreen(navController: NavHostController) {
         }
     }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .hazeSource(screenHaze())
+                .verticalScroll(rememberScrollState()),
         ) {
-            IconButton(onClick = { navController.popBackStack() }) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
-            }
-            Text("Настройки", style = MaterialTheme.typography.titleLarge)
-        }
-        HorizontalDivider()
-        Row(
+            Spacer(Modifier.height(GlassHeaderHeight))
+            
+            Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { pickFolder.launch(null) }
@@ -588,17 +453,17 @@ fun SettingsScreen(navController: NavHostController) {
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(Icons.Filled.Folder, contentDescription = null, modifier = Modifier.padding(end = 16.dp))
             Column(Modifier.weight(1f)) {
                 Text("Папка для скачанных книг", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    folderName ?: "Не выбрана — книги сохраняются в личную папку приложения",
+                    folderName ?: "По умолчанию — папка Audiobook",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Icon(Icons.Filled.Folder, contentDescription = null)
         }
-        HorizontalDivider()
+        
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -607,6 +472,7 @@ fun SettingsScreen(navController: NavHostController) {
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(Icons.Outlined.Palette, contentDescription = null, modifier = Modifier.padding(end = 16.dp))
             Column(Modifier.weight(1f)) {
                 Text("Тема оформления", style = MaterialTheme.typography.bodyLarge)
                 Text(
@@ -615,9 +481,8 @@ fun SettingsScreen(navController: NavHostController) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Icon(Icons.Outlined.Palette, contentDescription = null)
         }
-        HorizontalDivider()
+        
         if (!tvDevice) {
             Row(
                 modifier = Modifier
@@ -627,14 +492,6 @@ fun SettingsScreen(navController: NavHostController) {
                     .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Акцентный цвет", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        accentLabel,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
                 val accentPreview = when {
                     accentColor == SettingsStore.ACCENT_CUSTOM -> {
                         customAccentHex?.toLongOrNull(16)?.toInt()?.let { Color(it) }
@@ -643,6 +500,14 @@ fun SettingsScreen(navController: NavHostController) {
                         if (isSystemInDarkTheme()) it.darkPrimary else it.lightPrimary
                     }
                 }
+                Column(Modifier.weight(1f)) {
+                    Text("Акцентный цвет", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        accentLabel,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Box(
                     modifier = Modifier
                         .size(20.dp)
@@ -650,7 +515,7 @@ fun SettingsScreen(navController: NavHostController) {
                         .background(accentPreview ?: MaterialTheme.colorScheme.primary),
                 )
             }
-            HorizontalDivider()
+            
         }
         Row(
             modifier = Modifier
@@ -678,7 +543,7 @@ fun SettingsScreen(navController: NavHostController) {
                     .clip(RoundedCornerShape(6.dp)),
             )
         }
-        HorizontalDivider()
+        
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -687,6 +552,7 @@ fun SettingsScreen(navController: NavHostController) {
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(Icons.Filled.Tv, contentDescription = null, modifier = Modifier.padding(end = 16.dp))
             Column(Modifier.weight(1f)) {
                 Text("Режим управления", style = MaterialTheme.typography.bodyLarge)
                 Text(
@@ -695,9 +561,8 @@ fun SettingsScreen(navController: NavHostController) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Icon(Icons.Filled.Tv, contentDescription = null)
         }
-        HorizontalDivider()
+        
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -706,6 +571,7 @@ fun SettingsScreen(navController: NavHostController) {
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(Icons.Outlined.ViewModule, contentDescription = null, modifier = Modifier.padding(end = 16.dp))
             Column(Modifier.weight(1f)) {
                 Text("Вид", style = MaterialTheme.typography.bodyLarge)
                 Text(
@@ -714,9 +580,8 @@ fun SettingsScreen(navController: NavHostController) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Icon(Icons.Outlined.ViewModule, contentDescription = null)
         }
-        HorizontalDivider()
+        
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -725,17 +590,17 @@ fun SettingsScreen(navController: NavHostController) {
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(Icons.Outlined.Category, contentDescription = null, modifier = Modifier.padding(end = 16.dp))
             Column(Modifier.weight(1f)) {
                 Text("Жанр на главной", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    homeGenre?.name ?: "Все книги",
+                    homeGenres.takeIf { it.isNotEmpty() }?.joinToString(", ") { it.name } ?: "Все книги",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Icon(Icons.Outlined.Category, contentDescription = null)
         }
-        HorizontalDivider()
+        
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -755,7 +620,7 @@ fun SettingsScreen(navController: NavHostController) {
                 onCheckedChange = { scope.launch { app.settingsStore.setHideTabLabels(it) } },
             )
         }
-        HorizontalDivider()
+        
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -764,6 +629,7 @@ fun SettingsScreen(navController: NavHostController) {
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(Icons.Outlined.TextFields, contentDescription = null, modifier = Modifier.padding(end = 16.dp))
             Column(Modifier.weight(1f)) {
                 Text("Шрифт", style = MaterialTheme.typography.bodyLarge)
                 Text(
@@ -772,9 +638,8 @@ fun SettingsScreen(navController: NavHostController) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Icon(Icons.Outlined.TextFields, contentDescription = null)
         }
-        HorizontalDivider()
+        
         if (!tvDevice) {
             Row(
                 modifier = Modifier
@@ -784,6 +649,7 @@ fun SettingsScreen(navController: NavHostController) {
                     .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                Icon(Icons.Outlined.ViewModule, contentDescription = null, modifier = Modifier.padding(end = 16.dp))
                 Column(Modifier.weight(1f)) {
                     Text("Высота подложки вкладок", style = MaterialTheme.typography.bodyLarge)
                     Text(
@@ -792,9 +658,8 @@ fun SettingsScreen(navController: NavHostController) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Icon(Icons.Outlined.ViewModule, contentDescription = null)
             }
-            HorizontalDivider()
+            
         }
         Row(
             modifier = Modifier
@@ -815,7 +680,7 @@ fun SettingsScreen(navController: NavHostController) {
                 onCheckedChange = { scope.launch { app.settingsStore.setResumeOnLaunch(it) } },
             )
         }
-        HorizontalDivider()
+        
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -835,7 +700,7 @@ fun SettingsScreen(navController: NavHostController) {
                 onCheckedChange = { scope.launch { app.settingsStore.setOpenPlayerOnLaunch(it) } },
             )
         }
-        HorizontalDivider()
+        
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -855,35 +720,26 @@ fun SettingsScreen(navController: NavHostController) {
                 onCheckedChange = { scope.launch { app.settingsStore.setCloseOnBackLongPress(it) } },
             )
         }
-        HorizontalDivider()
-        IgnoreListRow(
-            label = "Скрывать жанры",
-            subtitle = if (ignoredGenres.isEmpty()) "Книги таких жанров не показывать" else "В списке: ${ignoredGenres.size}",
-            icon = { Icon(Icons.Outlined.FilterAltOff, contentDescription = null) },
-            onClick = { ignoreSection = IgnoreSection.GENRE },
-        )
-        HorizontalDivider()
-        IgnoreListRow(
-            label = "Скрывать авторов",
-            subtitle = if (ignoredAuthors.isEmpty()) "Книги таких авторов не показывать" else "В списке: ${ignoredAuthors.size}",
-            icon = { Icon(Icons.Outlined.PersonOff, contentDescription = null) },
-            onClick = { ignoreSection = IgnoreSection.AUTHOR },
-        )
-        HorizontalDivider()
-        IgnoreListRow(
-            label = "Скрывать чтецов",
-            subtitle = if (ignoredReaders.isEmpty()) "Книги с такими чтецами не показывать" else "В списке: ${ignoredReaders.size}",
-            icon = { Icon(Icons.Outlined.Hearing, contentDescription = null) },
-            onClick = { ignoreSection = IgnoreSection.READER },
-        )
-        HorizontalDivider()
-        IgnoreListRow(
-            label = "Скрывать источники",
-            subtitle = if (hiddenSources.isEmpty()) "Скрытые источники не использовать" else "Скрыто: ${hiddenSources.size}",
-            icon = { Icon(Icons.Outlined.VisibilityOff, contentDescription = null) },
-            onClick = { showSourcesDialog = true },
-        )
-        HorizontalDivider()
+        
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showHiddenGenresDialog = true }
+                .tvFocus()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Outlined.FilterAltOff, contentDescription = null, modifier = Modifier.padding(end = 16.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Скрывать жанры", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    if (ignoredGenres.isEmpty()) "Книги таких жанров не показывать" else "В списке: ${ignoredGenres.size}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -903,7 +759,7 @@ fun SettingsScreen(navController: NavHostController) {
                 onCheckedChange = { scope.launch { app.settingsStore.setHideFemaleAuthors(it) } },
             )
         }
-        HorizontalDivider()
+        
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -912,6 +768,7 @@ fun SettingsScreen(navController: NavHostController) {
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(Icons.Outlined.Backup, contentDescription = null, modifier = Modifier.padding(end = 16.dp))
             Column(Modifier.weight(1f)) {
                 Text("Создать резервную копию", style = MaterialTheme.typography.bodyLarge)
                 Text(
@@ -920,9 +777,8 @@ fun SettingsScreen(navController: NavHostController) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Icon(Icons.Outlined.Backup, contentDescription = null)
         }
-        HorizontalDivider()
+        
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -931,6 +787,7 @@ fun SettingsScreen(navController: NavHostController) {
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(Icons.Outlined.Restore, contentDescription = null, modifier = Modifier.padding(end = 16.dp))
             Column(Modifier.weight(1f)) {
                 Text("Восстановить из файла", style = MaterialTheme.typography.bodyLarge)
                 Text(
@@ -939,7 +796,6 @@ fun SettingsScreen(navController: NavHostController) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Icon(Icons.Outlined.Restore, contentDescription = null)
         }
         backupMessage?.let {
             Text(
@@ -949,35 +805,31 @@ fun SettingsScreen(navController: NavHostController) {
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
         }
-        HorizontalDivider()
+        
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(enabled = !logsBusy) { sendLogs() }
+                .clickable {
+                    runCatching {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/listen_everyone"))
+                        context.startActivity(intent)
+                    }
+                }
                 .tvFocus()
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(Icons.Outlined.Send, contentDescription = null, modifier = Modifier.padding(end = 16.dp))
             Column(Modifier.weight(1f)) {
-                Text("Отправить логи", style = MaterialTheme.typography.bodyLarge)
+                Text("Связаться в Telegram", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    if (logsBusy) "Собираю логи..." else
-                        "Файл журнала ошибок отправить на vlasov5020@gmail.com",
+                    "@listen_everyone — поддержка и обратная связь по приложению",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Icon(Icons.Outlined.Send, contentDescription = null)
         }
-        logsMessage?.let {
-            Text(
-                it,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 16.dp),
-            )
-        }
-        HorizontalDivider()
+        
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -986,6 +838,7 @@ fun SettingsScreen(navController: NavHostController) {
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(Icons.Outlined.CleaningServices, contentDescription = null, modifier = Modifier.padding(end = 16.dp))
             Column(Modifier.weight(1f)) {
                 Text("Очистить кеш", style = MaterialTheme.typography.bodyLarge)
                 Text(
@@ -994,7 +847,6 @@ fun SettingsScreen(navController: NavHostController) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Icon(Icons.Outlined.CleaningServices, contentDescription = null)
         }
         if (cacheCleared) {
             Text(
@@ -1004,7 +856,7 @@ fun SettingsScreen(navController: NavHostController) {
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
         }
-        HorizontalDivider()
+        
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1013,6 +865,12 @@ fun SettingsScreen(navController: NavHostController) {
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(
+                imageVector = Icons.Filled.Delete,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(end = 16.dp),
+            )
             Column(Modifier.weight(1f)) {
                 Text("Очистить прогресс прослушивания", style = MaterialTheme.typography.bodyLarge)
                 Text(
@@ -1021,11 +879,6 @@ fun SettingsScreen(navController: NavHostController) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Icon(
-                imageVector = Icons.Filled.Delete,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.error,
-            )
         }
         if (clearDone) {
             Text(
@@ -1035,7 +888,7 @@ fun SettingsScreen(navController: NavHostController) {
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
         }
-        HorizontalDivider()
+        
         val updateSubtitle = when (val s = updateStatus) {
             is UpdateStatus.Idle -> "Проверить наличие новой версии"
             is UpdateStatus.Checking -> "Проверка обновлений…"
@@ -1058,6 +911,7 @@ fun SettingsScreen(navController: NavHostController) {
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(Icons.Outlined.SystemUpdate, contentDescription = null, modifier = Modifier.padding(end = 16.dp))
             Column(Modifier.weight(1f)) {
                 Text("Обновление приложения", style = MaterialTheme.typography.bodyLarge)
                 Text(
@@ -1089,7 +943,7 @@ fun SettingsScreen(navController: NavHostController) {
                         "${s.percent}%",
                         style = MaterialTheme.typography.labelLarge,
                     )
-                else -> Icon(Icons.Outlined.SystemUpdate, contentDescription = null)
+                else -> Spacer(Modifier.size(20.dp))
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -1102,6 +956,7 @@ fun SettingsScreen(navController: NavHostController) {
                 modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
             )
         }
+        Spacer(Modifier.height(GlassBottomClearance))
     }
 
     if (showThemeDialog) {
@@ -1208,10 +1063,18 @@ fun SettingsScreen(navController: NavHostController) {
             title = { Text("Вид") },
             text = {
                 Column {
-                    val options = if (wideView) {
-                        viewOptions + (SettingsStore.VIEW_GRID3 to "Сетка в 3 столбца")
-                    } else {
-                        viewOptions
+                    val options = when {
+                        isTvMode -> viewOptions
+                            .filterNot { it.first == SettingsStore.VIEW_GRID }
+                            .map {
+                                if (it.first == SettingsStore.VIEW_GRID3) {
+                                    it.copy(second = "Столбцы")
+                                } else {
+                                    it
+                                }
+                            }
+                        wideView -> viewOptions
+                        else -> viewOptions.filterNot { it.first == SettingsStore.VIEW_GRID3 }
                     }
                     options.forEach { (mode, label) ->
                         Row(
@@ -1243,11 +1106,10 @@ fun SettingsScreen(navController: NavHostController) {
 
     if (showHomeGenreDialog) {
         HomeGenreDialog(
-            current = homeGenre,
+            current = homeGenres,
             onDismiss = { showHomeGenreDialog = false },
-            onSelect = { genre ->
-                scope.launch { app.settingsStore.setHomeGenre(genre) }
-                showHomeGenreDialog = false
+            onCommit = { genres ->
+                scope.launch { app.settingsStore.setHomeGenres(genres) }
             },
         )
     }
@@ -1372,69 +1234,6 @@ fun SettingsScreen(navController: NavHostController) {
         )
     }
 
-    if (showSourcesDialog) {
-        AlertDialog(
-            onDismissRequest = { showSourcesDialog = false },
-            title = { Text("Скрывать источники") },
-            text = {
-                Column {
-                    val sources = app.sourceRegistry.sources
-                    if (sources.isEmpty()) {
-                        Text(
-                            "Источники не зарегистрированы",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 360.dp)
-                                .verticalScroll(rememberScrollState()),
-                        ) {
-                            sources.forEach { source ->
-                                val hidden = source.id in hiddenSources
-                                val toggle: () -> Unit = {
-                                    scope.launch { app.settingsStore.setSourceHidden(source.id, !hidden) }
-                                }
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable(onClick = toggle)
-                                        .tvFocus()
-                                        .padding(vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        source.name,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    Checkbox(
-                                        checked = !hidden,
-                                        onCheckedChange = { toggle() },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "Скрытые источники не участвуют в поиске и не могут быть выбраны. " +
-                            "На экране «Источники» они показаны затемнёнными.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showSourcesDialog = false }) {
-                    Text("Готово")
-                }
-            },
-        )
-    }
-
     if (showCacheConfirm) {
         AlertDialog(
             onDismissRequest = { showCacheConfirm = false },
@@ -1490,23 +1289,22 @@ fun SettingsScreen(navController: NavHostController) {
         )
     }
 
-    if (ignoreSection != null) {
-        val section = ignoreSection ?: IgnoreSection.GENRE
-        val items = when (section) {
-            IgnoreSection.GENRE -> ignoredGenres
-            IgnoreSection.AUTHOR -> ignoredAuthors
-            IgnoreSection.READER -> ignoredReaders
-        }
-        IgnoreListDialog(
-            section = section,
-            items = items,
-            onAdd = { value ->
-                scope.launch { app.settingsStore.addIgnored(section, value) }
+    if (showHiddenGenresDialog) {
+        HiddenGenresDialog(
+            ignoredGenres = ignoredGenres,
+            onToggle = { name ->
+                scope.launch {
+                    val existing = ignoredGenres.firstOrNull {
+                        app.normalizeGenreName(it) == app.normalizeGenreName(name)
+                    }
+                    if (existing != null) {
+                        app.settingsStore.removeIgnored(IgnoreSection.GENRE, existing)
+                    } else {
+                        app.settingsStore.addIgnored(IgnoreSection.GENRE, name)
+                    }
+                }
             },
-            onRemove = { value ->
-                scope.launch { app.settingsStore.removeIgnored(section, value) }
-            },
-            onDismiss = { ignoreSection = null },
+            onDismiss = { showHiddenGenresDialog = false },
         )
     }
 
@@ -1531,6 +1329,16 @@ fun SettingsScreen(navController: NavHostController) {
             },
         )
     }
+
+    GlassHeader(
+        modifier = Modifier.align(Alignment.TopCenter),
+    ) {
+        IconButton(onClick = { navController.popBackStack() }) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+        }
+        Text("Настройки", style = MaterialTheme.typography.titleLarge)
+    }
+    }
 }
 
 /**
@@ -1539,9 +1347,9 @@ fun SettingsScreen(navController: NavHostController) {
  */
 @Composable
 private fun HomeGenreDialog(
-    current: HomeGenre?,
+    current: List<HomeGenre>,
     onDismiss: () -> Unit,
-    onSelect: (HomeGenre?) -> Unit,
+    onCommit: (List<HomeGenre>) -> Unit,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as AudioBookApplication
@@ -1558,6 +1366,20 @@ private fun HomeGenreDialog(
         }.onSuccess { genres = it }
             .onFailure { error = it.message ?: "Ошибка загрузки жанров" }
     }
+    fun toggle(genre: Genre) {
+        val sid = sourceId ?: return
+        val key = app.normalizeGenreName(genre.name)
+        val updated = if (current.any { app.normalizeGenreName(it.name) == key }) {
+            current.filterNot { app.normalizeGenreName(it.name) == key }
+        } else {
+            current + HomeGenre(sourceId = sid, url = genre.url, name = genre.name)
+        }
+        onCommit(updated)
+    }
+    fun removeByName(name: String) {
+        val key = app.normalizeGenreName(name)
+        onCommit(current.filterNot { app.normalizeGenreName(it.name) == key })
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Жанр на главной") },
@@ -1566,17 +1388,18 @@ private fun HomeGenreDialog(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onSelect(null) }
+                        .clickable { onCommit(emptyList()) }
                         .tvFocus()
-                        .padding(vertical = 8.dp),
+                        .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    Checkbox(
+                        checked = current.isEmpty(),
+                        onCheckedChange = { onCommit(emptyList()) },
+                    )
                     Text("Все книги", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                    if (current == null) {
-                        Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    }
                 }
-                HorizontalDivider()
+                
                 val items = genres
                 when {
                     items == null && error == null -> {
@@ -1602,22 +1425,54 @@ private fun HomeGenreDialog(
                                 .verticalScroll(rememberScrollState()),
                         ) {
                             items.forEach { genre ->
-                                val selected = current?.url == genre.url
+                                val checked = current.any { app.normalizeGenreName(it.name) == app.normalizeGenreName(genre.name) }
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable { onSelect(HomeGenre(sourceId ?: "", genre.url, genre.name)) }
+                                        .clickable { toggle(genre) }
                                         .tvFocus()
-                                        .padding(vertical = 8.dp),
+                                        .padding(vertical = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
+                                    Checkbox(
+                                        checked = checked,
+                                        onCheckedChange = { toggle(genre) },
+                                    )
                                     Text(
                                         genre.name,
                                         style = MaterialTheme.typography.bodyLarge,
                                         modifier = Modifier.weight(1f),
                                     )
-                                    if (selected) {
-                                        Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                            val extra = current.filter { entry ->
+                                items.none { app.normalizeGenreName(it.name) == app.normalizeGenreName(entry.name) }
+                            }.distinctBy { app.normalizeGenreName(it.name) }
+                            if (extra.isNotEmpty()) {
+                                
+                                Text(
+                                    "Выбранные, но отсутствующие в этом источнике",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                extra.forEach { entry ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { removeByName(entry.name) }
+                                            .tvFocus()
+                                            .padding(vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Checkbox(
+                                            checked = true,
+                                            onCheckedChange = { removeByName(entry.name) },
+                                        )
+                                        Text(
+                                            entry.name,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            modifier = Modifier.weight(1f),
+                                        )
                                     }
                                 }
                             }
@@ -1633,7 +1488,138 @@ private fun HomeGenreDialog(
                     )
                 }
                 Text(
-                    "Книги выбранного жанра будут показываться на главном экране вместо всех книг",
+                    "Книги отмеченных жанров будут показываться на главном экране вместо всех книг",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Закрыть")
+            }
+        },
+    )
+}
+
+/**
+ * Выбор жанров для скрытия: чекбоксы для множественного выбора.
+ * Жанры загружаются из текущего источника (как в [HomeGenreDialog]).
+ */
+@Composable
+private fun HiddenGenresDialog(
+    ignoredGenres: Set<String>,
+    onToggle: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val app = context.applicationContext as AudioBookApplication
+    var genres by remember { mutableStateOf<List<Genre>?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        genres = null
+        error = null
+        runCatching {
+            val source = app.activeSource()
+            source?.genres()?.distinctBy { it.url }?.sortedBy { it.name }.orEmpty()
+        }.onSuccess { genres = it }
+            .onFailure { error = it.message ?: "Ошибка загрузки жанров" }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Скрывать жанры") },
+        text = {
+            Column {
+                val items = genres
+                when {
+                    items == null && error == null -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                            horizontalArrangement = Arrangement.Center,
+                        ) {
+                            CircularProgressIndicator()
+                        }
+                    }
+                    items != null && items.isEmpty() -> {
+                        Text(
+                            "Список жанров пуст",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    items != null -> {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 360.dp)
+                                .verticalScroll(rememberScrollState()),
+                        ) {
+                            items.forEach { genre ->
+                                val checked = ignoredGenres.any { app.normalizeGenreName(it) == app.normalizeGenreName(genre.name) }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onToggle(genre.name) }
+                                        .tvFocus()
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Checkbox(
+                                        checked = checked,
+                                        onCheckedChange = { onToggle(genre.name) },
+                                    )
+                                    Text(
+                                        genre.name,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                            }
+                            val extra = ignoredGenres.filter { name ->
+                                items.none { app.normalizeGenreName(it.name) == app.normalizeGenreName(name) }
+                            }.sorted()
+                            if (extra.isNotEmpty()) {
+                                
+                                Text(
+                                    "Скрытые, но отсутствующие в этом источнике",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                extra.forEach { name ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { onToggle(name) }
+                                            .tvFocus()
+                                            .padding(vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Checkbox(
+                                            checked = true,
+                                            onCheckedChange = { onToggle(name) },
+                                        )
+                                        Text(
+                                            name,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                error?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+                Text(
+                    "Книги отмеченных жанров не будут отображаться",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp),

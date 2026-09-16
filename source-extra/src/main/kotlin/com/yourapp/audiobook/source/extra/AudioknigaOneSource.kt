@@ -76,8 +76,6 @@ class AudioknigaOneSource(
         return BookDetails(book = book, description = description, tracks = parseTracks(html, title))
     }
 
-    override fun supportsSeries(): Boolean = true
-
     override suspend fun seriesBooks(seriesUrl: String, page: Int): List<Book> {
         val story = java.net.URLDecoder.decode(seriesUrl.substringAfter("story=").substringBefore("&"), "UTF-8")
         val html = postForm(
