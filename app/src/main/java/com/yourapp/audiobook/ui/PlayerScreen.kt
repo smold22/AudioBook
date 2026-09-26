@@ -121,6 +121,7 @@ fun PlayerScreen(navController: NavHostController) {
     val favoriteKeys by app.favoritesStore.favoriteKeys.collectAsStateWithLifecycle(initialValue = emptySet())
     val watchlistKeys by app.watchlistStore.watchlistKeys.collectAsStateWithLifecycle(initialValue = emptySet())
     val bookmarks by viewModel.bookmarks.collectAsStateWithLifecycle()
+    val nextBookSuggestion by viewModel.nextBookSuggestion.collectAsStateWithLifecycle()
     val equalizerState by viewModel.equalizerState.collectAsStateWithLifecycle()
     var showSleepDialog by remember { mutableStateOf(false) }
     var showBookmarksDialog by remember { mutableStateOf(false) }
@@ -550,6 +551,49 @@ fun PlayerScreen(navController: NavHostController) {
                 showReaderDialog = false
             },
             onDismiss = { showReaderDialog = false },
+        )
+    }
+    nextBookSuggestion?.let { nextBook ->
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissNextBookSuggestion() },
+            title = { Text("Следующая книга в серии") },
+            text = {
+                Column {
+                    Text(
+                        text = "Книга закончилась. Хотите начать воспроизведение следующей книги серии?",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = nextBook.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    val authorOrReader = listOfNotNull(nextBook.author, nextBook.reader).joinToString(" · ")
+                    if (authorOrReader.isNotBlank()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = authorOrReader,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { viewModel.playNextBook() },
+                ) {
+                    Text("Слушать")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.dismissNextBookSuggestion() },
+                ) {
+                    Text("Отмена")
+                }
+            },
         )
     }
 }

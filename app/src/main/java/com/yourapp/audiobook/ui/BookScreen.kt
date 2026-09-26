@@ -3,6 +3,7 @@ package com.yourapp.audiobook.ui
 import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -65,6 +67,9 @@ import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.launch
 
 private const val MAX_DESCRIPTION_WORDS = 10
+
+private val NowPlayingLight = Color(0xFFD32F2F)
+private val NowPlayingDark = Color(0xFFFF5252)
 
 class BookViewModelFactory(
     private val app: AudioBookApplication,
@@ -396,6 +401,11 @@ private fun TrackRow(
     downloadEnabled: Boolean,
     onDownload: () -> Unit,
 ) {
+    val currentColor = if (isCurrent) {
+        if (isSystemInDarkTheme()) NowPlayingDark else NowPlayingLight
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -407,14 +417,14 @@ private fun TrackRow(
         Text(
             text = (index + 1).toString(),
             style = MaterialTheme.typography.labelLarge,
-            color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            color = if (isCurrent) currentColor else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.width(28.dp),
         )
         Column(Modifier.weight(1f)) {
             Text(
                 text = track.title,
                 style = MaterialTheme.typography.bodyLarge,
-                color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                color = if (isCurrent) currentColor else MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

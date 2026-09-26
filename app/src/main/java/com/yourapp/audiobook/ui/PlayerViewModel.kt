@@ -58,6 +58,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     val bookmarks: StateFlow<List<Bookmark>> get() = controller.bookmarks
 
+    val nextBookSuggestion: StateFlow<Book?> get() = controller.nextBookSuggestion
+
     val equalizerState: StateFlow<EqualizerState> get() = controller.equalizer.state
 
     private var tickerJob: Job? = null
@@ -97,6 +99,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun setEqualizerBandLevel(index: Int, levelMb: Int) = controller.equalizer.setBandLevel(index, levelMb)
 
     fun resetEqualizer() = controller.equalizer.reset()
+
+    fun playNextBook() = controller.playNextBook()
+
+    fun dismissNextBookSuggestion() = controller.dismissNextBookSuggestion()
 
     fun togglePlayPause() = controller.togglePlayPause()
 
@@ -177,7 +183,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 val merged = details.book.copy(
                     title = details.book.title.ifBlank { option.title },
-                    coverUrl = details.book.coverUrl ?: option.coverUrl,
+                    coverUrl = details.book.coverUrl?.takeIf { it.isNotBlank() } ?: option.coverUrl,
                     author = details.book.author ?: option.author,
                     reader = details.book.reader ?: option.reader,
                 )

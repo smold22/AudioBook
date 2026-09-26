@@ -49,7 +49,7 @@ class BazaKnigSource(
         val doc = Jsoup.parse(html, url)
         val h1 = doc.selectFirst("h1")?.ownText()?.trim()
         val title = h1?.substringBefore(" - ") ?: ""
-        val cover = doc.selectFirst(".full-img img, .img-responsive")?.attr("src").toNullIfBlank()
+        val cover = doc.selectFirst(".full-img img, .img-responsive")?.absUrl("src").toNullIfBlank()
         val description = doc.selectFirst(".short-text")?.ownText().toNullIfBlank()
 
         var author: String? = null

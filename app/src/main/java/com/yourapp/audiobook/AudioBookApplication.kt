@@ -8,6 +8,7 @@ import coil3.ImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import okhttp3.OkHttpClient
 import com.yourapp.audiobook.data.BookCache
+import com.yourapp.audiobook.ui.InitialsCoverFetcher
 import com.yourapp.audiobook.data.BookDescriptionStore
 import com.yourapp.audiobook.data.BackupManager
 import com.yourapp.audiobook.data.BookmarksStore
@@ -41,7 +42,7 @@ import kotlinx.coroutines.launch
 import com.yourapp.audiobook.source.extra.AknigaComSource
 import com.yourapp.audiobook.source.extra.AknigaSource
 import com.yourapp.audiobook.source.extra.AknigXyzSource
-import com.yourapp.audiobook.source.extra.AudioLibSource
+import com.yourapp.audiobook.source.extra.AudioKnigaBizSource
 import com.yourapp.audiobook.source.extra.AudioknigiOnlainSource
 import com.yourapp.audiobook.source.extra.AuthorTodaySource
 import com.yourapp.audiobook.source.extra.Aknigi24Source
@@ -51,6 +52,7 @@ import com.yourapp.audiobook.source.extra.AudioknigiTopSource
 import com.yourapp.audiobook.source.extra.AudioknigaOneSource
 import com.yourapp.audiobook.source.extra.AudioknigiProSource
 import com.yourapp.audiobook.source.extra.AudiomirSource
+import com.yourapp.audiobook.source.extra.AudiopolkaSource
 import com.yourapp.audiobook.source.extra.BazaKnigSource
 import com.yourapp.audiobook.source.extra.BookZvukSource
 import com.yourapp.audiobook.source.extra.BookishSource
@@ -60,6 +62,7 @@ import com.yourapp.audiobook.source.extra.KnigaVuheSource
 import com.yourapp.audiobook.source.extra.KnigiAudioNetSource
 import com.yourapp.audiobook.source.extra.KnigobludSource
 import com.yourapp.audiobook.source.extra.Lis10bookSource
+import com.yourapp.audiobook.source.extra.MdsSource
 import com.yourapp.audiobook.source.extra.OtrubSource
 import com.yourapp.audiobook.source.extra.PoleknigSource
 import com.yourapp.audiobook.source.extra.RuKnigaMeSource
@@ -92,8 +95,11 @@ class AudioBookApplication : Application() {
                 chain.proceed(builder.build())
             }
             .build()
-        imageLoader = ImageLoader.Builder(this)
-            .components { add(OkHttpNetworkFetcherFactory(client)) }
+imageLoader = ImageLoader.Builder(this)
+            .components {
+                add(OkHttpNetworkFetcherFactory(client))
+                add(InitialsCoverFetcher.Factory())
+            }
             .build()
     }
 
@@ -182,16 +188,21 @@ lateinit var historyStore: HistoryStore
                 runCatching { source.getBookDetails(book.url) }.getOrNull()
             } ?: return
         }
-        if (details.tracks.isEmpty()) return
+        val resolved = if (details.book.coverUrl.isNullOrBlank() && !book.coverUrl.isNullOrBlank()) {
+            details.copy(book = details.book.copy(coverUrl = book.coverUrl))
+        } else {
+            details
+        }
+        if (resolved.tracks.isEmpty()) return
         val progress = progressStore.load(bookKey)
         val savedTrack = progress?.trackIndex ?: 0
-        val trackIndex = savedTrack.takeIf { it in details.tracks.indices } ?: 0
+        val trackIndex = savedTrack.takeIf { it in resolved.tracks.indices } ?: 0
         val positionMs = if (trackIndex == savedTrack) progress?.positionMs ?: 0L else 0L
         val localUris = withContext(Dispatchers.IO) {
-            val trackNames = com.yourapp.audiobook.download.trackFileNames(details)
+            val trackNames = com.yourapp.audiobook.download.trackFileNames(resolved)
             downloadManager.offlineTrackUris(bookKey, trackNames)
         }
-        playerController.play(details, trackIndex, positionMs, localUris)
+        playerController.play(resolved, trackIndex, positionMs, localUris)
         ContextCompat.startForegroundService(
             this@AudioBookApplication,
             Intent(this@AudioBookApplication, PlaybackService::class.java),
@@ -350,11 +361,13 @@ sourceRegistry = SourceRegistry().apply {
             register(AuthorTodaySource())
             register(RuKnigaMeSource())
             register(TAudioknigiMp3Source())
-            register(AudioLibSource())
             register(AknigXyzSource())
             register(KnigaAudioSource())
-            register(KnigiAudioNetSource())
+register(KnigiAudioNetSource())
             register(AudioknigiOnlainSource())
+            register(AudiopolkaSource())
+            register(AudioKnigaBizSource())
+            register(MdsSource())
         }
 bookCache = BookCache()
         descriptionCache = BookDescriptionStore(this)

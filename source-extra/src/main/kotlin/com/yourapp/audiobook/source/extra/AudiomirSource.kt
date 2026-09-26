@@ -54,8 +54,8 @@ class AudiomirSource(
         val reader = fnscValue(doc, "Читает")
         val genre = doc.select(".main-news-c a").eachText().joinToString(", ").toNullIfBlank()
         val duration = fnscValue(doc, "Время")
-        val cover = doc.selectFirst(".main-news-image img")?.attr("src")
-            ?.let { if (it.startsWith("http")) it else baseUrl + it }.toNullIfBlank()
+        val cover = doc.selectFirst(".full-news-image img, .main-news-image img")?.absUrl("src")
+            .toNullIfBlank()
         val description = doc.selectFirst(".full-news-text, .main-news-text")?.text().toNullIfBlank()
         val seriesDiv = doc.select(".fnsc-left div").firstOrNull {
             (it.selectFirst("i")?.text() ?: "").startsWith("Серия") ||

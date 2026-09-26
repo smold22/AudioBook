@@ -149,33 +149,6 @@ class NewSourcesCheckTest {
     }
 
     @Test
-    fun checkAudioLib() = runBlocking {
-        val s = AudioLibSource()
-        try {
-            val home = s.home(1)
-            println("HOME ${s.id} -> ${home.size} books; first=${home.firstOrNull()?.title} | cover=${home.firstOrNull()?.coverUrl} | ${home.firstOrNull()?.url}")
-            if (home.isEmpty()) return@runBlocking
-            val b = home.first()
-            val details = s.getBookDetails(b.url)
-            println("DETAILS title=${details.book.title} author=${details.book.author} tracks=${details.tracks.size}")
-            details.tracks.take(2).forEach { println("  T: ${it.title} | ${it.url.take(90)}") }
-            val search = s.search("Шантарам", 1)
-            println("SEARCH -> ${search.size}")
-            val g = s.genres()
-            println("GENRES -> ${g.size}: ${g.take(5).joinToString { it.name }}")
-            if (g.isNotEmpty()) {
-                val gb = s.books(g.first().url, 1)
-                println("GENRE BOOKS ${g.first().name} -> ${gb.size}")
-                println("COUNT ${g.first().name} -> ${s.genreBookCount(g.first().url)}")
-            }
-            val page2 = s.home(2)
-            println("HOME p2 -> ${page2.size} books")
-        } catch (e: Exception) {
-            println("ERROR: ${e.javaClass.simpleName}: ${e.message?.take(120)}")
-        }
-    }
-
-    @Test
     fun checkAknigXyz() = runBlocking {
         val s = AknigXyzSource()
         try {
@@ -338,6 +311,34 @@ class NewSourcesCheckTest {
             }
             val page2 = s.home(2)
             println("HOME p2 -> ${page2.size} books")
+        } catch (e: Exception) {
+            println("ERROR: ${e.javaClass.simpleName}: ${e.message?.take(120)}")
+        }
+    }
+
+    @Test
+    fun checkMds() = runBlocking {
+        val s = MdsSource()
+        try {
+            val home = s.home(1)
+            println("HOME ${s.id} -> ${home.size} books; first=${home.firstOrNull()?.title} | author=${home.firstOrNull()?.author} | ${home.firstOrNull()?.url}")
+            if (home.isEmpty()) return@runBlocking
+            val b = home.first()
+            val details = s.getBookDetails(b.url)
+            println("DETAILS title=${details.book.title} author=${details.book.author} genre=${details.book.genre} dur=${details.book.durationText} tracks=${details.tracks.size}")
+            details.tracks.take(2).forEach { println("  T: ${it.title} | ${it.url.take(90)} ") }
+            val search = s.search("Война", 1)
+            println("SEARCH -> ${search.size} results")
+            val g = s.genres()
+            println("GENRES -> ${g.size}: ${g.take(5).joinToString { it.name }}")
+            if (g.isNotEmpty()) {
+                val gb = s.books(g.first().url, 1)
+                println("GENRE BOOKS ${g.first().name} -> ${gb.size}")
+            }
+            val page2 = s.home(2)
+            println("HOME p2 -> ${page2.size} books")
+            val newP1 = s.newBooks(1)
+            println("NEW p1 -> ${newP1.size} books; first=${newP1.firstOrNull()?.title}")
         } catch (e: Exception) {
             println("ERROR: ${e.javaClass.simpleName}: ${e.message?.take(120)}")
         }

@@ -44,8 +44,13 @@ import okhttp3.OkHttpClient
  */
 fun Uri.stripRefParam(): Pair<Uri, String?> {
     val ref = getQueryParameter("ref") ?: return this to null
-    val clean = buildUpon().clearQuery().build()
-    return clean to "https://$ref/"
+    val builder = buildUpon().clearQuery()
+    queryParameterNames
+        .filter { it != "ref" }
+        .forEach { name ->
+            getQueryParameters(name).forEach { value -> builder.appendQueryParameter(name, value) }
+        }
+    return builder.build() to "https://$ref/"
 }
 
 data class NowPlaying(

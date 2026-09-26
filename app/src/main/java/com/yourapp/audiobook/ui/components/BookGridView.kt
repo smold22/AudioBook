@@ -29,7 +29,6 @@ import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
 import coil3.compose.LocalPlatformContext
 import coil3.request.ImageRequest
@@ -89,7 +88,7 @@ private fun BookGridRow(
     action: (@Composable (Book) -> Unit)? = null,
 ) {
     val context = LocalPlatformContext.current
-    val imageLoader = remember { SingletonImageLoader.get(context) }
+    val imageLoader = rememberAppImageLoader()
     val prefetchUrls = remember(prefetchBooks) {
         prefetchBooks.mapNotNull { it.coverUrl }.joinToString("\u0001")
     }

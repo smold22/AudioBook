@@ -112,7 +112,7 @@ class BookViewModel(app: Application, private val bookKey: String) : AndroidView
                 val details = source.getBookDetails(book.url)
                 val merged = details.book.copy(
                     title = details.book.title.ifBlank { book.title },
-                    coverUrl = details.book.coverUrl ?: book.coverUrl,
+                    coverUrl = details.book.coverUrl?.takeIf { it.isNotBlank() } ?: book.coverUrl,
                     genre = details.book.genre ?: book.genre,
                     author = details.book.author ?: book.author,
                     seriesTitle = details.book.seriesTitle ?: book.seriesTitle,
