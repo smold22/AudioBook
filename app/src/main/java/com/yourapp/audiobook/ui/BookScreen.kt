@@ -3,7 +3,6 @@ package com.yourapp.audiobook.ui
 import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,7 +43,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,13 +61,11 @@ import com.yourapp.audiobook.ui.components.BookSectionRow
 import com.yourapp.audiobook.ui.components.DownloadButton
 import com.yourapp.audiobook.ui.components.rememberDownloadStarter
 import com.yourapp.audiobook.ui.components.rememberTrackDownloadStarter
+import com.yourapp.audiobook.ui.theme.nowPlayingColor
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.launch
 
 private const val MAX_DESCRIPTION_WORDS = 10
-
-private val NowPlayingLight = Color(0xFFD32F2F)
-private val NowPlayingDark = Color(0xFFFF5252)
 
 class BookViewModelFactory(
     private val app: AudioBookApplication,
@@ -401,11 +397,7 @@ private fun TrackRow(
     downloadEnabled: Boolean,
     onDownload: () -> Unit,
 ) {
-    val currentColor = if (isCurrent) {
-        if (isSystemInDarkTheme()) NowPlayingDark else NowPlayingLight
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val currentColor = if (isCurrent) nowPlayingColor() else MaterialTheme.colorScheme.onSurfaceVariant
     Row(
         modifier = Modifier
             .fillMaxWidth()

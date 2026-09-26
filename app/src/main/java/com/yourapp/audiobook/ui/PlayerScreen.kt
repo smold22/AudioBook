@@ -106,6 +106,7 @@ import com.yourapp.audiobook.player.SleepTimer
 import com.yourapp.audiobook.player.SleepTimerMode
 import com.yourapp.audiobook.source.api.AudioTrack
 import com.yourapp.audiobook.ui.components.DownloadButton
+import com.yourapp.audiobook.ui.theme.nowPlayingColor
 import kotlinx.coroutines.launch
 
 @Composable
@@ -606,11 +607,13 @@ private fun TrackList(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val currentColor = nowPlayingColor()
     LazyColumn(
         modifier = modifier,
         state = listState,
     ) {
         itemsIndexed(tracks, key = { index, track -> "${track.url}#$index" }) { index, track ->
+            val isCurrent = index == currentIndex
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -622,13 +625,13 @@ private fun TrackList(
                 Text(
                     text = (index + 1).toString(),
                     style = MaterialTheme.typography.labelLarge,
-                    color = if (index == currentIndex) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (isCurrent) currentColor else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.width(28.dp),
                 )
                 Text(
                     text = track.title,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = if (index == currentIndex) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    color = if (isCurrent) currentColor else MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
