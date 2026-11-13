@@ -1,6 +1,7 @@
 package com.yourapp.audiobook.ui
 
 import android.net.Uri
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.History
@@ -23,6 +25,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -98,11 +102,24 @@ fun HistoryScreen(navController: NavHostController) {
                             navController.navigate("book/${Uri.encode(app.bookCache.keyOf(book))}")
                         },
                         action = { book ->
-                            IconButton(onClick = {
-                                scope.launch {
-                                    app.historyStore.remove(app.bookCache.keyOf(book))
-                                }
-                            }) {
+                            // Кнопка сфокусирована, но значок без подсветки не
+                            // показывает, где курсор: добавляем фон при фокусе.
+                            var focused by remember(book.id) { mutableStateOf(false) }
+                            IconButton(
+                                onClick = {
+                                    scope.launch {
+                                        app.historyStore.remove(app.bookCache.keyOf(book))
+                                    }
+                                },
+                                modifier = Modifier
+                                    .onFocusChanged { focused = it.isFocused }
+                                    .background(
+                                        color = if (focused) MaterialTheme.colorScheme.errorContainer
+                                        else Color.Transparent,
+                                        shape = CircleShape,
+                                    )
+                                    .tvFocus(),
+                            ) {
                                 Icon(
                                     imageVector = Icons.Outlined.Delete,
                                     contentDescription = "Удалить из истории",

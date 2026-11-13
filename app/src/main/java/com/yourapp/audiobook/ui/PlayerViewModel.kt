@@ -88,6 +88,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setSleepTimerToEndOfChapter() = controller.setSleepTimerToEndOfChapter()
 
+    fun setSleepTimerToEndOfBook() = controller.setSleepTimerToEndOfBook()
+
+    /** Длительность затухания перед остановкой, секунды. 0 — выключено. */
+    val sleepTimerFadeSeconds: StateFlow<Int> get() = controller.fadeSeconds
+
+    fun setSleepTimerFadeSeconds(seconds: Int) = controller.setFadeSeconds(seconds)
+
     fun addBookmark() = controller.addBookmark()
 
     fun removeBookmark(id: String) = controller.removeBookmark(id)

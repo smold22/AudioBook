@@ -6,18 +6,28 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.ui.AppNavHost
 import com.yourapp.audiobook.ui.FocusBorderIndication
 import com.yourapp.audiobook.ui.LocalUiMode
 import com.yourapp.audiobook.ui.UpdateDialogs
+import com.yourapp.audiobook.ui.config.LocalUiConfig
+import com.yourapp.audiobook.ui.config.LocalUiConfigViewModel
+import com.yourapp.audiobook.ui.config.UiConfig
+import com.yourapp.audiobook.ui.config.UiConfigViewModel
 import com.yourapp.audiobook.ui.theme.AudioBookTheme
 
 /**
@@ -76,6 +86,11 @@ fun AppRoot(uiMode: String, onExitApp: () -> Unit) {
     }
     val accentColor by settings.accentColor.collectAsStateWithLifecycle(initialValue = SettingsStore.ACCENT_DYNAMIC)
     val customAccentHex by settings.customAccentColor.collectAsStateWithLifecycle(initialValue = null)
+    // Кастомизация интерфейса (форма обложек, плотность, разделы, элементы плеера)
+    // приходит одним объектом из UiConfigViewModel и раздаётся через LocalUiConfig.
+    val uiConfigViewModel: UiConfigViewModel = viewModel()
+    val uiConfig by uiConfigViewModel.config.collectAsStateWithLifecycle(initialValue = UiConfig.Default)
+    val uiConfigLoaded by uiConfigViewModel.loaded.collectAsStateWithLifecycle()
     // В горизонтальной ориентации используем ТВ-интерфейс (боковая навигация,
     // обводка фокуса), как на Android TV. В портретной — смартфон-интерфейс.
     val isTv = uiMode == SettingsStore.UI_MODE_TV ||
@@ -84,6 +99,8 @@ fun AppRoot(uiMode: String, onExitApp: () -> Unit) {
     CompositionLocalProvider(
         LocalUiMode provides effectiveUiMode,
         LocalIndication provides if (isTv) FocusBorderIndication() else LocalIndication.current,
+        LocalUiConfig provides uiConfig,
+        LocalUiConfigViewModel provides uiConfigViewModel,
     ) {
         AudioBookTheme(
             darkTheme = darkTheme,
@@ -95,7 +112,18 @@ fun AppRoot(uiMode: String, onExitApp: () -> Unit) {
             LaunchedEffect(Unit) {
                 app.updateManager.checkForUpdates(auto = true)
             }
-            AppNavHost(onExitApp = onExitApp)
+            // Граф навигации строится один раз, поэтому ждём сохранённую
+            // конфигурацию: иначе стартовый раздел и порядок вкладок зафиксируют
+            // значения по умолчанию до того, как DataStore вернёт данные.
+            if (uiConfigLoaded) {
+                AppNavHost(onExitApp = onExitApp)
+            } else {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background),
+                )
+            }
             UpdateDialogs(app.updateManager)
         }
     }

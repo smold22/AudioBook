@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -53,6 +54,17 @@ class SettingsStore(context: Context) {
     private val homeGenreNameKey = stringPreferencesKey("home_genre_name")
     private val appIconKey = stringPreferencesKey("app_icon")
     private val playbackSpeedKey = floatPreferencesKey("playback_speed")
+
+    // Кастомизация интерфейса. Строки (а не числа и не множества) — чтобы
+    // snapshotAll/restoreAll переносили их в облако без потери типа.
+    private val listDensityKey = stringPreferencesKey("list_density")
+    private val playerShowCoverKey = booleanPreferencesKey("player_show_cover")
+    private val playerShowTrackTitleKey = booleanPreferencesKey("player_show_track_title")
+    private val playerShowRemainingKey = booleanPreferencesKey("player_show_remaining")
+    private val navOrderKey = stringPreferencesKey("nav_order")
+    private val hiddenSectionsKey = stringPreferencesKey("hidden_sections")
+    private val startSectionKey = stringPreferencesKey("start_section")
+    private val sleepTimerFadeKey = intPreferencesKey("sleep_timer_fade_seconds")
 
     val downloadFolder: Flow<String?> =
         appContext.settingsDataStore.data.map { it[folderKey] }
@@ -175,6 +187,79 @@ class SettingsStore(context: Context) {
         appContext.settingsDataStore.edit { prefs ->
             prefs[tabUnderlayHeightKey] = mode
         }
+        changeSignal.emit(Unit)
+    }
+
+    /** Плотность списков: [DENSITY_COMPACT], [DENSITY_NORMAL], [DENSITY_SPACIOUS]. */
+    val listDensity: Flow<String> =
+        appContext.settingsDataStore.data.map { it[listDensityKey] ?: DENSITY_NORMAL }
+
+    val playerShowCover: Flow<Boolean> =
+        appContext.settingsDataStore.data.map { it[playerShowCoverKey] ?: true }
+
+    val playerShowTrackTitle: Flow<Boolean> =
+        appContext.settingsDataStore.data.map { it[playerShowTrackTitleKey] ?: true }
+
+    val playerShowRemaining: Flow<Boolean> =
+        appContext.settingsDataStore.data.map { it[playerShowRemainingKey] ?: true }
+
+    /** Порядок разделов нижней навигации, маршруты через [SECTION_SEPARATOR]. */
+    val navOrder: Flow<String> =
+        appContext.settingsDataStore.data.map { it[navOrderKey] ?: "" }
+
+    /** Скрытые разделы нижней навигации, маршруты через [SECTION_SEPARATOR]. */
+    val hiddenSections: Flow<String> =
+        appContext.settingsDataStore.data.map { it[hiddenSectionsKey] ?: "" }
+
+    /** Маршрут раздела, открываемого при запуске. */
+    val startSection: Flow<String> =
+        appContext.settingsDataStore.data.map { it[startSectionKey] ?: "" }
+
+    /** Длина затухания перед остановкой по таймеру сна, секунды. 0 — выключено. */
+    val sleepTimerFadeSeconds: Flow<Int> =
+        appContext.settingsDataStore.data.map { it[sleepTimerFadeKey] ?: 0 }
+
+    suspend fun setSleepTimerFadeSeconds(seconds: Int) {
+        appContext.settingsDataStore.edit { prefs -> prefs[sleepTimerFadeKey] = seconds }
+        changeSignal.emit(Unit)
+    }
+
+    suspend fun setListDensity(density: String) {
+        appContext.settingsDataStore.edit { prefs -> prefs[listDensityKey] = density }
+        changeSignal.emit(Unit)
+    }
+
+    suspend fun setPlayerShowCover(show: Boolean) {
+        appContext.settingsDataStore.edit { prefs -> prefs[playerShowCoverKey] = show }
+        changeSignal.emit(Unit)
+    }
+
+    suspend fun setPlayerShowTrackTitle(show: Boolean) {
+        appContext.settingsDataStore.edit { prefs -> prefs[playerShowTrackTitleKey] = show }
+        changeSignal.emit(Unit)
+    }
+
+    suspend fun setPlayerShowRemaining(show: Boolean) {
+        appContext.settingsDataStore.edit { prefs -> prefs[playerShowRemainingKey] = show }
+        changeSignal.emit(Unit)
+    }
+
+    suspend fun setNavOrder(routes: List<String>) {
+        appContext.settingsDataStore.edit { prefs ->
+            prefs[navOrderKey] = routes.joinToString(SECTION_SEPARATOR)
+        }
+        changeSignal.emit(Unit)
+    }
+
+    suspend fun setHiddenSections(routes: Set<String>) {
+        appContext.settingsDataStore.edit { prefs ->
+            prefs[hiddenSectionsKey] = routes.sorted().joinToString(SECTION_SEPARATOR)
+        }
+        changeSignal.emit(Unit)
+    }
+
+    suspend fun setStartSection(route: String) {
+        appContext.settingsDataStore.edit { prefs -> prefs[startSectionKey] = route }
         changeSignal.emit(Unit)
     }
 
@@ -437,8 +522,13 @@ class SettingsStore(context: Context) {
                     return@forEach
                 }
                 when (name) {
-                    resumeOnLaunchKey.name, openPlayerOnLaunchKey.name, hideTabLabelsKey.name, hideFemaleAuthorsKey.name, closeOnBackLongPressKey.name ->
+                    resumeOnLaunchKey.name, openPlayerOnLaunchKey.name, hideTabLabelsKey.name, hideFemaleAuthorsKey.name, closeOnBackLongPressKey.name,
+                    playerShowCoverKey.name, playerShowTrackTitleKey.name, playerShowRemainingKey.name ->
                         prefs[booleanPreferencesKey(name)] = value.toBooleanStrictOrNull() ?: false
+                    // Иначе число ляжет в строковый ключ, и при чтении
+                    // DataStore посчитает типы несовместимыми.
+                    sleepTimerFadeKey.name ->
+                        prefs[intPreferencesKey(name)] = value.toIntOrNull() ?: 0
                     else -> prefs[stringPreferencesKey(name)] = value
                 }
             }
@@ -484,7 +574,14 @@ class SettingsStore(context: Context) {
         const val APP_ICON_DEFAULT = "default"
         const val APP_ICON_ALT = "alt1"
 
+        const val DENSITY_COMPACT = "density_compact"
+        const val DENSITY_NORMAL = "density_normal"
+        const val DENSITY_SPACIOUS = "density_spacious"
+
         private const val SET_ITEM_SEPARATOR = "\u0001"
+
+        /** Разделитель маршрутов в списках разделов нижней навигации. */
+        const val SECTION_SEPARATOR = ","
 
         const val downloadFolderName = "download_folder"
         const val bookFolderPrefix = "bookFolder:"

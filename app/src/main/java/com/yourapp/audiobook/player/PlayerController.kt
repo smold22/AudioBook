@@ -1,9 +1,13 @@
 package com.yourapp.audiobook.player
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.view.animation.LinearInterpolator
 import androidx.core.content.ContextCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -35,6 +39,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 
@@ -59,12 +64,15 @@ data class NowPlaying(
     val details: BookDetails,
 )
 
-enum class SleepTimerMode { TIME, END_OF_CHAPTER }
+/** Режим остановки: по времени, на границе главы или в конце книги. */
+enum class SleepTimerMode { TIME, END_OF_CHAPTER, END_OF_BOOK }
 
 data class SleepTimer(
     val mode: SleepTimerMode,
     val endAtMs: Long? = null,
     val minutes: Int? = null,
+    /** Длина затухания перед остановкой, секунды. 0 — без затухания. */
+    val fadeSeconds: Int = SleepTimerPolicy.FADE_DEFAULT_SECONDS,
 )
 
 class PlayerController(
@@ -173,24 +181,73 @@ class PlayerController(
     init {
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
-                    reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT
+                if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_AUTO &&
+                    reason != Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT
                 ) {
-                    val timer = _sleepTimer.value ?: return
-                    if (timer.mode == SleepTimerMode.END_OF_CHAPTER) {
-                        _sleepTimer.value = null
-                        pause()
-                    }
+                    return
                 }
+                val timer = _sleepTimer.value ?: return
+                val previousIndex = mediaItemTransitionFrom
+                mediaItemTransitionFrom = player.currentMediaItemIndex
+                if (previousIndex < 0) return
+                if (!SleepTimerPolicy.pauseOnTransition(
+                        timer.mode,
+                        previousIndex,
+                        player.currentMediaItemIndex,
+                        player.mediaItemCount,
+                    )
+                ) {
+                    return
+                }
+                stopForSleepTimer()
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 val timer = _sleepTimer.value ?: return
-                if (timer.mode == SleepTimerMode.END_OF_CHAPTER &&
-                    playbackState == Player.STATE_ENDED
+                if (playbackState != Player.STATE_ENDED) return
+                if (SleepTimerPolicy.clearOnEnded(
+                        timer.mode,
+                        player.currentMediaItemIndex,
+                        player.mediaItemCount,
+                    )
                 ) {
+                    // STATE_ENDED приходит уже после паузы, поэтому только
+                    // снимаем таймер и возвращаем громкость, если она была
+                    // приглушена затуханием.
+                    stopFade(restoreVolume = true)
                     _sleepTimer.value = null
+                    fadeCancelledByUser = false
                 }
+            }
+
+            /**
+             * Ручное изменение громкости (клавиши, Bluetooth, панель) во время
+             * затухания — отменяем его. Иначе аниматор тут же перезапишет
+             * выбранный пользователем уровень.
+             *
+             * Собственные записи аниматора отсекаем по счётчику: Media3
+             * доставляет события с задержкой, и к моменту обработки аниматор
+             * успевает записать ещё несколько кадров.
+             */
+            override fun onVolumeChanged(volume: Float) {
+                if (SleepTimerPolicy.isOwnVolumeWrite(
+                        pendingSelfWrites = pendingSelfVolumeWrites,
+                        lastWrittenVolume = lastWrittenVolume,
+                        reportedVolume = volume,
+                    )
+                ) {
+                    if (pendingSelfVolumeWrites > 0) pendingSelfVolumeWrites--
+                    return
+                }
+                if (!fadeRunning) return
+                // Громкость изменили извне — оставляем её как есть и запрещаем
+                // повторный запуск затухания до конца текущего таймера.
+                fadeCancelledByUser = true
+                stopFade(restoreVolume = false)
+                // Новый уровень пользователя становится точкой отсчёта, иначе
+                // на границе главы мы вернули бы громкость к старой.
+                volumeBeforeFade = volume
+                volumeReducedByFade = false
             }
         })
     }
@@ -198,11 +255,80 @@ class PlayerController(
     private val _nowPlaying = MutableStateFlow<NowPlaying?>(null)
     val nowPlaying: StateFlow<NowPlaying?> = _nowPlaying.asStateFlow()
 
+    /**
+     * Счётчик запусков воспроизведения.
+     *
+     * Отличать «начали играть» от «уже играет» по [nowPlaying] нельзя: там нет
+     * события, а на телевизоре по нажатию «Слушать» нужно открыть плеер даже
+     * для уже загруженной книги.
+     */
+    private val _playStarts = MutableStateFlow(0)
+    val playStarts: StateFlow<Int> = _playStarts.asStateFlow()
+
     private val _bookmarks = MutableStateFlow<List<Bookmark>>(emptyList())
     val bookmarks: StateFlow<List<Bookmark>> = _bookmarks.asStateFlow()
 
     private val _sleepTimer = MutableStateFlow<SleepTimer?>(null)
     val sleepTimer: StateFlow<SleepTimer?> = _sleepTimer.asStateFlow()
+
+    /** Длина затухания, выбранная в настройках: 0 — не затухать. */
+    private val _fadeSeconds = MutableStateFlow(SleepTimerPolicy.FADE_DEFAULT_SECONDS)
+    val fadeSeconds: StateFlow<Int> = _fadeSeconds.asStateFlow()
+
+    private var fadeAnimator: ValueAnimator? = null
+
+    /** Идёт ли затухание прямо сейчас: без этого нельзя вернуть громкость. */
+    private var fadeRunning = false
+
+    /**
+     * Пользователь тронул громкость во время затухания: до конца текущего
+     * таймера больше не гасим, иначе аниматор затыкал бы звук вопреки выбору.
+     */
+    private var fadeCancelledByUser = false
+
+    /** Громкость до затухания — из неё начинаем спад и в неё возвращаемся. */
+    private var volumeBeforeFade = 1f
+
+    /**
+     * Снизили ли мы громкость и ещё не вернули.
+     *
+     * Отдельный флаг, а не [fadeRunning]: восстановление происходит уже после
+     * того, как аниматор снят, и опираться на «идёт ли аниматор» нельзя —
+     * иначе громкость остаётся на нуле и звук пропадает до следующей книги.
+     */
+    private var volumeReducedByFade = false
+
+    /**
+     * Сколько записей громкости мы сделали сами и Media3 ещё не подтвердил.
+     *
+     * Счётчик 1:1 с событиями [Player.Listener.onVolumeChanged]: пока событие
+     * лежит в очереди главного потока, аниматор успевает записать ещё кадры,
+     * поэтому «последние N значений» протухают и обрывают затухание.
+     */
+    private var pendingSelfVolumeWrites = 0
+
+    /** Последнее значение, выставленное нами: страховка от склейки событий. */
+    private var lastWrittenVolume = 1f
+
+    /** Индекс главы до последнего перехода — для «до конца главы/книги». */
+    private var mediaItemTransitionFrom = -1
+
+    /** Аниматор затухания живёт только на [scope] и снимается при паузе. */
+    private fun applyFadeSeconds(seconds: Int) {
+        _fadeSeconds.value = seconds
+        // Действующий таймер должен увидеть новую длительность, иначе выбор
+        // в настройке не подхватится до следующего запуска таймера.
+        _sleepTimer.value = _sleepTimer.value?.copy(fadeSeconds = seconds)
+        // Затухание уже идёт: снимаем его, а следующий тик запустит заново
+        // с новой длительностью. Точную пересборку аниматора на ходу делать
+        // незачем — затухание длится считаные секунды.
+        if (fadeRunning) stopFade(restoreVolume = true)
+    }
+
+    fun setFadeSeconds(seconds: Int) {
+        applyFadeSeconds(seconds)
+        scope.launch { settingsStore.setSleepTimerFadeSeconds(seconds) }
+    }
 
     /** Находит следующую книгу серии (цикла) после завершения текущей. Устанавливается приложением. */
     var nextSeriesBookProvider: (suspend (BookDetails) -> Book?)? = null
@@ -253,6 +379,10 @@ class PlayerController(
         player.addListener(object : Player.Listener {
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 if (!playWhenReady) {
+                    // Пауза во время затухания: аниматор снимаем и возвращаем
+                    // уровень — иначе после возобновления звука не будет.
+                    // Если затухания не было, громкость не трогаем.
+                    stopFade(restoreVolume = true)
                     saveProgressNow()
                 } else if (_nowPlaying.value != null && player.mediaItemCount > 0) {
                     try {
@@ -266,16 +396,26 @@ class PlayerController(
             }
         })
         scope.launch {
+            // Сохраняем выбранную длительность затухания.
+            applyFadeSeconds(settingsStore.sleepTimerFadeSeconds.first())
+            settingsStore.sleepTimerFadeSeconds
+                .map { it }
+                .collect { applyFadeSeconds(it) }
+        }
+        scope.launch {
+            // Границы глав/книжи: переход уже обработан слушателем, здесь
+            // держим mediaItemTransitionFrom в актуальном состоянии.
             while (true) {
                 delay(1000)
-                val timer = _sleepTimer.value ?: continue
-                if (timer.mode == SleepTimerMode.TIME) {
-                    val endAt = timer.endAtMs ?: continue
-                    if (System.currentTimeMillis() >= endAt) {
-                        _sleepTimer.value = null
-                        pause()
-                    }
+                if (_sleepTimer.value == null) {
+                    mediaItemTransitionFrom = player.currentMediaItemIndex
                 }
+            }
+        }
+        scope.launch {
+            while (true) {
+                delay(TIMER_TICK_MS)
+                checkSleepTimer()
             }
         }
         scope.launch {
@@ -288,6 +428,183 @@ class PlayerController(
 
     private var lastSavedTrack = -1
     private var lastSavedPosition = -1L
+
+    /**
+     * Тик таймера сна: гасит звук перед остановкой и останавливает плеер.
+     *
+     * Отсчёт идёт по [SleepTimerPolicy]; сам таймер снимается тут же после
+     * паузы, чтобы бейдж в плеере не показывал уже завершившийся отсчёт.
+     */
+    private fun checkSleepTimer() {
+        val timer = _sleepTimer.value ?: return
+        val fadeSeconds = timer.fadeSeconds
+
+        if (timer.mode == SleepTimerMode.TIME) {
+            if (!SleepTimerPolicy.timeExpired(timer.endAtMs, System.currentTimeMillis())) {
+                maybeStartFade(fadeSeconds, remainingMs = (timer.endAtMs ?: 0L) - System.currentTimeMillis())
+                return
+            }
+            // Дедлайн наступил, но затухание ещё идёт — даём ему дописать
+            // спад, иначе громкость прыгнет вверх на середине затухания.
+            if (fadeRunning) return
+            stopForSleepTimer()
+            return
+        }
+
+        // Режимы по главе/книже: пауза наступает на границе, её обрабатывает
+        // слушатель переходов. Здесь только затухание у конца главы.
+        if (!SleepTimerPolicy.fadeAppliesToChapter(
+                timer.mode,
+                player.currentMediaItemIndex,
+                player.mediaItemCount,
+            )
+        ) {
+            return
+        }
+        val remaining = remainingChapterMs() ?: return
+        maybeStartFade(fadeSeconds, remaining)
+        // Длительность главы уточняется по ходу, поэтому оценка остатка на
+        // старте затухания устаревает. Каждый тик продлеваем (или укорачиваем)
+        // спад так, чтобы он пришёл ровно к нулю, а не на пару секунд раньше.
+        reanchorRunningFade(remaining)
+    }
+
+    /**
+     * Дотягивает уже идущий спад до реального конца главы.
+     *
+     * Меняем [ValueAnimator.duration] на «уже прошло + осталось»: у аниматора
+     * это сдвигает момент финала, поэтому спад всегда приходит на 0.
+     */
+    private fun reanchorRunningFade(remainingMs: Long) {
+        val animator = fadeAnimator ?: return
+        if (!fadeRunning) return
+        if (remainingMs <= 0L) {
+            // До конца уже не ждём: доводим спад до тишины и останавливаем.
+            stopForSleepTimer()
+            return
+        }
+        val elapsed = (animator.animatedFraction * animator.duration).toLong()
+        val target = SleepTimerPolicy.fadeDurationForRemaining(elapsed, remainingMs)
+        if (target > animator.duration) animator.duration = target
+    }
+
+    /**
+     * Остаток текущей главы в миллисекундах либо null, если длительность
+     * неизвестна (стриминг, ещё не загрузилось).
+     */
+    private fun remainingChapterMs(): Long? {
+        val duration = player.duration
+        if (duration == C.TIME_UNSET || duration <= 0L) return null
+        return (duration - player.currentPosition).coerceAtLeast(0L)
+    }
+
+    /** Запускает затухание, если до остановки осталось меньше, чем его длина. */
+    private fun maybeStartFade(fadeSeconds: Int, remainingMs: Long) {
+        // Затухание имеет смысл только на живом воспроизведении: на паузе
+        // звука и так нет, а аниматор лишь зря крутит громкость. Повторно его
+        // не поднимаем, если оно уже идёт или его отменил пользователь.
+        if (!SleepTimerPolicy.shouldStartFade(
+                remainingMs = remainingMs,
+                fadeSeconds = fadeSeconds,
+                isPlaying = player.isPlaying,
+                fadeRunning = fadeRunning,
+                cancelledByUser = fadeCancelledByUser,
+            )
+        ) {
+            return
+        }
+        startFade(SleepTimerPolicy.effectiveFadeMs(remainingMs, fadeSeconds))
+    }
+
+    /** Плавно снижает громкость до нуля за [durationMs]. */
+    private fun startFade(durationMs: Long) {
+        if (durationMs <= 0L) return
+        stopFade(restoreVolume = false)
+        volumeBeforeFade = player.volume
+        fadeRunning = true
+        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = durationMs
+            interpolator = LinearInterpolator()
+            addUpdateListener { anim ->
+                val fraction = anim.animatedFraction
+                setPlayerVolume(SleepTimerPolicy.fadeVolume(volumeBeforeFade, fraction))
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    // ValueAnimator зовёт onAnimationEnd и при cancel(), поэтому
+                    // сверяемся с текущим аниматором: чужой (уже снятый) конец
+                    // не должен ни возвращать громкость, ни ставить паузу.
+                    if (animation !== fadeAnimator) return
+                    // Снимать аниматор здесь нельзя: stopForSleepTimer должен
+                    // увидеть, что спад шёл, и вернуть громкость после паузы.
+                    stopForSleepTimer()
+                }
+            })
+        }
+        fadeAnimator = animator
+        animator.start()
+    }
+
+    /**
+     * Останавливает затухание.
+     *
+     * [restoreVolume] = true оставляет громкость как есть, если затухание
+     * не шло, — иначе обычная пауза обнуляла бы выбор пользователя.
+     */
+    private fun stopFade(restoreVolume: Boolean) {
+        val animator = fadeAnimator
+        fadeAnimator = null
+        fadeRunning = false
+        pendingSelfVolumeWrites = 0
+        if (animator != null) {
+            animator.removeAllUpdateListeners()
+            // Слушатель тоже снимаем: cancel() зовёт onAnimationEnd, а тот
+            // останавливает плеер по таймеру.
+            animator.removeAllListeners()
+            animator.cancel()
+        }
+        if (restoreVolume && volumeReducedByFade) restoreVolumeAfterFade()
+    }
+
+    /**
+     * Выставляет громкость от нашего имени: событие [Player.Listener.onVolumeChanged]
+     * придёт следом, и [pendingSelfVolumeWrites] защитит его от ложной отмены.
+     */
+    private fun setPlayerVolume(volume: Float) {
+        val clamped = volume.coerceIn(0f, 1f)
+        lastWrittenVolume = clamped
+        pendingSelfVolumeWrites++
+        if (clamped < volumeBeforeFade) volumeReducedByFade = true
+        player.volume = clamped
+    }
+
+    /** Возвращает уровень, который был до затухания. */
+    private fun restoreVolumeAfterFade() {
+        setPlayerVolume(volumeBeforeFade)
+        volumeReducedByFade = false
+    }
+
+    /**
+     * Пауза по таймеру: снимаем таймер, гасим звук и возвращаем громкость.
+     *
+     * Порядок важен. На границе главы ExoPlayer успевает отдать первые кадры
+     * следующей главы, а `duration` у VBR-дорожек включает паддинг, поэтому
+     * переход приходит на пару секунд раньше конца отсчёта. Если вернуть
+     * громкость до паузы, звук прыгнет вверх и затухание прозвучит
+     * оборванным. Поэтому сначала доводим спад до тишины и ставим паузу,
+     * и лишь затем, уже на паузе, возвращаем уровень.
+     */
+    private fun stopForSleepTimer() {
+        _sleepTimer.value = null
+        fadeCancelledByUser = false
+        val wasFading = fadeRunning
+        stopFade(restoreVolume = false)
+        if (wasFading) setPlayerVolume(0f)
+        pause()
+        if (SleepTimerPolicy.restoreVolumeAfterPause(volumeReducedByFade)) {
+            restoreVolumeAfterFade()
+        }
+    }
 
     fun saveProgressNow() {
         val nowPlaying = _nowPlaying.value ?: return
@@ -313,24 +630,81 @@ class PlayerController(
     private fun bookKey(book: Book): String = "${book.sourceId}:${book.id}"
 
     fun setSleepTimer(minutes: Int?) {
+        stopFade(restoreVolume = true)
+        fadeCancelledByUser = false
+        mediaItemTransitionFrom = player.currentMediaItemIndex
         _sleepTimer.value = minutes?.let {
             SleepTimer(
                 mode = SleepTimerMode.TIME,
                 endAtMs = System.currentTimeMillis() + it * 60_000L,
                 minutes = it,
+                fadeSeconds = _fadeSeconds.value,
             )
         }
     }
 
     fun setSleepTimerToEndOfChapter() {
-        _sleepTimer.value = SleepTimer(mode = SleepTimerMode.END_OF_CHAPTER)
+        stopFade(restoreVolume = true)
+        fadeCancelledByUser = false
+        mediaItemTransitionFrom = player.currentMediaItemIndex
+        _sleepTimer.value = SleepTimer(
+            mode = SleepTimerMode.END_OF_CHAPTER,
+            fadeSeconds = _fadeSeconds.value,
+        )
     }
 
-    fun play(details: BookDetails, startIndex: Int, startPositionMs: Long, localUris: List<Uri?>? = null) {
+    fun setSleepTimerToEndOfBook() {
+        stopFade(restoreVolume = true)
+        fadeCancelledByUser = false
+        mediaItemTransitionFrom = player.currentMediaItemIndex
+        _sleepTimer.value = SleepTimer(
+            mode = SleepTimerMode.END_OF_BOOK,
+            fadeSeconds = _fadeSeconds.value,
+        )
+    }
+
+    /**
+     * Загружает книгу в плеер.
+     *
+     * [autoPlay] = false только подготавливает книгу на сохранённой позиции,
+     * не начиная воспроизведение: нужно для «Открывать окно плеера при запуске»
+     * без включённого автовоспроизведения последней книги.
+     */
+    fun play(
+        details: BookDetails,
+        startIndex: Int,
+        startPositionMs: Long,
+        localUris: List<Uri?>? = null,
+        autoPlay: Boolean = true,
+    ) {
         if (details.tracks.isEmpty()) return
         _sleepTimer.value = null
+        fadeCancelledByUser = false
+        // Новая книга не должна начинаться с приглушённой громкости.
+        stopFade(restoreVolume = true)
+        mediaItemTransitionFrom = startIndex
         _nextBookSuggestion.value = null
-        val items = details.tracks.mapIndexed { index, track ->
+        val items = buildMediaItems(details, localUris)
+        player.setMediaItems(
+            items,
+            startIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0)),
+            if (startPositionMs > 0) startPositionMs else 0L,
+        )
+        player.prepare()
+        player.playWhenReady = autoPlay
+        equalizer.attachIfNeeded(player.audioSessionId)
+        _nowPlaying.value = NowPlaying(details.book, details.tracks, details)
+        // Счётчик означает именно запуск воспроизведения: подготовка книги
+        // на паузе не должна открывать плеер на ТВ как реакцию на «Слушать».
+        if (autoPlay) _playStarts.value = _playStarts.value + 1
+        scope.launch {
+            historyStore.record(details.book)
+            _bookmarks.value = bookmarksStore.load(bookKey(details.book))
+        }
+    }
+
+    private fun buildMediaItems(details: BookDetails, localUris: List<Uri?>?): List<MediaItem> =
+        details.tracks.mapIndexed { index, track ->
             val uri = localUris?.getOrNull(index) ?: Uri.parse(track.url)
             MediaItem.Builder()
                 .setMediaId("${details.book.id}:$index")
@@ -345,20 +719,6 @@ class PlayerController(
                 )
                 .build()
         }
-        player.setMediaItems(
-            items,
-            startIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0)),
-            if (startPositionMs > 0) startPositionMs else 0L,
-        )
-        player.prepare()
-        player.playWhenReady = true
-        equalizer.attachIfNeeded(player.audioSessionId)
-        _nowPlaying.value = NowPlaying(details.book, details.tracks, details)
-        scope.launch {
-            historyStore.record(details.book)
-            _bookmarks.value = bookmarksStore.load(bookKey(details.book))
-        }
-    }
 
     fun addBookmark() {
         val playing = _nowPlaying.value ?: return
@@ -389,6 +749,7 @@ class PlayerController(
         val playing = _nowPlaying.value ?: return
         if (index !in playing.tracks.indices) return
         player.seekTo(index, positionMs.coerceAtLeast(0L))
+        mediaItemTransitionFrom = index
         player.playWhenReady = true
     }
 
@@ -443,6 +804,8 @@ class PlayerController(
     fun stopAndClear() {
         saveProgressNow()
         _sleepTimer.value = null
+        fadeCancelledByUser = false
+        stopFade(restoreVolume = true)
         _nextBookSuggestion.value = null
         player.stop()
         player.clearMediaItems()
@@ -466,5 +829,8 @@ class PlayerController(
 
     private companion object {
         const val SAVE_INTERVAL_MS = 5_000L
+
+        /** Частота проверки таймера сна: чаще секунды не нужно. */
+        const val TIMER_TICK_MS = 500L
     }
 }

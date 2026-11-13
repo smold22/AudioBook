@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.yourapp.audiobook.AudioBookApplication
 import com.yourapp.audiobook.source.api.Book
+import com.yourapp.audiobook.ui.config.uiMetrics
 import com.yourapp.audiobook.ui.isTvMode
 import com.yourapp.audiobook.ui.rememberAppImageLoader
 import com.yourapp.audiobook.ui.tvFocus
@@ -48,6 +49,7 @@ internal fun sourceName(book: Book): String? =
 fun BookCard(book: Book, onClick: () -> Unit) {
     val imageLoader = rememberAppImageLoader()
     val tvMode = isTvMode
+    val metrics = uiMetrics()
     var contextBook by remember { mutableStateOf<Book?>(null) }
     Row(
         modifier = Modifier
@@ -64,7 +66,10 @@ fun BookCard(book: Book, onClick: () -> Unit) {
                 },
             )
             .tvFocus()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(
+                horizontal = metrics.listRowHorizontalPadding,
+                vertical = metrics.listRowVerticalPadding,
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AsyncImage(
@@ -74,11 +79,11 @@ fun BookCard(book: Book, onClick: () -> Unit) {
             error = CoverError,
             imageLoader = imageLoader,
             modifier = Modifier
-                .size(width = 76.dp, height = 114.dp)
+                .size(width = metrics.listCoverWidth, height = metrics.listCoverHeight)
                 .clip(RoundedCornerShape(8.dp)),
             contentScale = ContentScale.Crop,
         )
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(metrics.listTextGap))
         Column(Modifier.weight(1f)) {
             book.seriesTitle?.let { series ->
                 Text(

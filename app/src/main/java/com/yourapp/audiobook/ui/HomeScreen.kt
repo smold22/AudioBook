@@ -69,6 +69,7 @@ fun HomeScreen(navController: NavHostController) {
     val listState = rememberLazyListState()
 
     val newBooks by viewModel.newBooks.collectAsStateWithLifecycle()
+    val tvMode = isTvMode
 
     val shouldLoadMore by remember {
         derivedStateOf {
@@ -109,23 +110,30 @@ fun HomeScreen(navController: NavHostController) {
         navController.navigate("book/${Uri.encode(app.bookCache.keyOf(book))}")
     }
 
+    val newBooksRow: @Composable () -> Unit = {
+        BookSectionRow(
+            title = "Новинки",
+            books = newBooks.take(8),
+            onBookClick = openBook,
+            onShowAll = { navController.navigate("new") },
+        )
+    }
+
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().hazeSource(haze)) {
             LazyColumn(
                 state = listState,
-                contentPadding = PaddingValues(top = GlassHeaderHeight + 4.dp, bottom = GlassBottomClearance),
-                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    top = GlassHeaderHeight + 4.dp,
+                    bottom = if (tvMode) 24.dp else GlassBottomClearance,
+                ),
+                modifier = Modifier.fillMaxWidth().weight(1f),
             ) {
-                if (newBooks.isNotEmpty()) {
-                    item(key = "new-books-row") {
-                        BookSectionRow(
-                            title = "Новинки",
-                            books = newBooks.take(8),
-                            onBookClick = openBook,
-                            onShowAll = { navController.navigate("new") },
-                        )
-                    }
-                }
+                // Строка «Новинки» объявлена всегда, даже когда подборка ещё
+                // пустая: BookSectionRow при пустом списке не рисует ничего, но
+                // индексы остаются постоянными и список не уезжает, когда
+                // подборка приходит позже основных книг.
+                item(key = "new-books-row") { newBooksRow() }
                 item(key = "all-books-title") {
                         Text(
                             text = when {

@@ -34,6 +34,7 @@ import coil3.compose.LocalPlatformContext
 import coil3.request.ImageRequest
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.source.api.Book
+import com.yourapp.audiobook.ui.config.uiMetrics
 import com.yourapp.audiobook.ui.isTvMode
 import com.yourapp.audiobook.ui.rememberAppImageLoader
 import com.yourapp.audiobook.ui.tvFocus
@@ -89,6 +90,7 @@ private fun BookGridRow(
 ) {
     val context = LocalPlatformContext.current
     val imageLoader = rememberAppImageLoader()
+    val metrics = uiMetrics()
     val prefetchUrls = remember(prefetchBooks) {
         prefetchBooks.mapNotNull { it.coverUrl }.joinToString("\u0001")
     }
@@ -100,8 +102,8 @@ private fun BookGridRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(horizontal = metrics.gridHorizontalPadding),
+        horizontalArrangement = Arrangement.spacedBy(metrics.gridSpacing),
     ) {
         books.forEach { book ->
             BookGridItem(
@@ -125,6 +127,7 @@ private fun BookGridItem(
 ) {
     val imageLoader = rememberAppImageLoader()
     val tvMode = isTvMode
+    val metrics = uiMetrics()
     var contextBook by remember { mutableStateOf<Book?>(null) }
     Column(
         modifier = modifier
@@ -140,7 +143,7 @@ private fun BookGridItem(
                 },
             )
             .tvFocus()
-            .padding(bottom = 8.dp),
+            .padding(bottom = metrics.gridItemBottomPadding),
     ) {
         Box {
             AsyncImage(

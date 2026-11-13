@@ -61,6 +61,7 @@ import com.yourapp.audiobook.ui.components.BookSectionRow
 import com.yourapp.audiobook.ui.components.DownloadButton
 import com.yourapp.audiobook.ui.components.rememberDownloadStarter
 import com.yourapp.audiobook.ui.components.rememberTrackDownloadStarter
+import com.yourapp.audiobook.ui.config.uiMetrics
 import com.yourapp.audiobook.ui.theme.nowPlayingColor
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.launch
@@ -125,16 +126,20 @@ fun BookScreen(bookKey: String, navController: NavHostController) {
                 contentPadding = PaddingValues(top = GlassHeaderHeight + 4.dp, bottom = GlassBottomClearance),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                item { BookHeader(
-                    state = state,
-                    fallbackTitle = details.book.title,
-                    onAuthorClick = { author ->
-                        navController.navigate("person/${Uri.encode(author)}?mode=author")
-                    },
-                    onReaderClick = { reader ->
-                        navController.navigate("person/${Uri.encode(reader)}?mode=reader")
-                    },
-                ) }
+                // На TV страница начинается сразу с серии и глав: обложка, название
+                // и описание занимают пол-экрана, а пролистывать их с пульта неудобно.
+                if (!tvMode) {
+                    item { BookHeader(
+                        state = state,
+                        fallbackTitle = details.book.title,
+                        onAuthorClick = { author ->
+                            navController.navigate("person/${Uri.encode(author)}?mode=author")
+                        },
+                        onReaderClick = { reader ->
+                            navController.navigate("person/${Uri.encode(reader)}?mode=reader")
+                        },
+                    ) }
+                }
                 if (!tvMode) {
                     item(key = "similar") {
                         BookSectionRow(
@@ -304,6 +309,7 @@ private fun BookHeader(
 ) {
     val book = state.book
     val imageLoader = rememberAppImageLoader()
+    val metrics = uiMetrics()
     var descriptionExpanded by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -312,7 +318,10 @@ private fun BookHeader(
                 contentDescription = book?.title,
                 imageLoader = imageLoader,
                 modifier = Modifier
-                    .size(width = 140.dp, height = 210.dp)
+                    .size(
+                        width = metrics.bookHeaderCoverWidth,
+                        height = metrics.bookHeaderCoverHeight,
+                    )
                     .clip(RoundedCornerShape(10.dp)),
                 contentScale = ContentScale.Crop,
             )
@@ -398,12 +407,16 @@ private fun TrackRow(
     onDownload: () -> Unit,
 ) {
     val currentColor = if (isCurrent) nowPlayingColor() else MaterialTheme.colorScheme.onSurfaceVariant
+    val metrics = uiMetrics()
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
             .tvFocus()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(
+                horizontal = metrics.trackHorizontalPadding,
+                vertical = metrics.trackVerticalPadding,
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(

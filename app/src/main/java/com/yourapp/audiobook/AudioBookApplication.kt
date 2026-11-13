@@ -149,24 +149,28 @@ lateinit var historyStore: HistoryStore
     /** Область приложения: корутины, переживающие уничтожение активностей. */
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    /** Защита от повторного возобновления прослушивания в рамках одного процесса. */
-    private var resumeAttempted = false
+    /** Защита от повторной подготовки последней книги в рамках одного процесса. */
+    private var launchBookPrepared = false
 
     /** Кеш жанров главного экрана: источник -> (выбранные названия, результат). */
     private val homeGenreCache = mutableMapOf<String, Pair<List<String>, List<HomeGenre>>>()
 
     /**
-     * Продолжает прослушивание последней книги при запуске, если включено в настройках.
+     * Готовит последнюю книгу при запуске, если включено автовоспроизведение
+     * или открытие плеера. Без автовоспроизведения книга загружается на паузе,
+     * чтобы экран плеера было что показать.
      * Работает в области приложения, поэтому не отменяется при уничтожении [LauncherActivity].
      */
-    fun resumeLastBookIfEnabled() {
-        if (resumeAttempted) return
-        resumeAttempted = true
+    fun prepareLastBookOnLaunch() {
+        if (launchBookPrepared) return
+        launchBookPrepared = true
         applicationScope.launch {
-            if (!settingsStore.resumeOnLaunch.first()) return@launch
+            val autoPlay = settingsStore.resumeOnLaunch.first()
+            val openPlayer = settingsStore.openPlayerOnLaunch.first()
+            if (!autoPlay && !openPlayer) return@launch
             if (playerController.nowPlaying.value != null) return@launch
             val last = historyStore.snapshot().firstOrNull() ?: return@launch
-            resumeBook(last.book)
+            resumeBook(last.book, autoPlay = autoPlay)
         }
     }
 
@@ -175,7 +179,7 @@ lateinit var historyStore: HistoryStore
      * воспроизведение с сохранённой позиции. Используется для возобновления
      * последней книги и для воспроизведения следующей книги серии.
      */
-    private suspend fun resumeBook(book: Book) {
+    private suspend fun resumeBook(book: Book, autoPlay: Boolean = true) {
         val bookKey = "${book.sourceId}:${book.id}"
         val offlineDetails = withContext(Dispatchers.IO) {
             runCatching { downloadManager.offlineDetails(bookKey) }.getOrNull()
@@ -202,11 +206,14 @@ lateinit var historyStore: HistoryStore
             val trackNames = com.yourapp.audiobook.download.trackFileNames(resolved)
             downloadManager.offlineTrackUris(bookKey, trackNames)
         }
-        playerController.play(resolved, trackIndex, positionMs, localUris)
-        ContextCompat.startForegroundService(
-            this@AudioBookApplication,
-            Intent(this@AudioBookApplication, PlaybackService::class.java),
-        )
+        playerController.play(resolved, trackIndex, positionMs, localUris, autoPlay)
+        // На паузе сервис запустит сам плеер, когда пользователь нажмёт «Играть».
+        if (autoPlay) {
+            ContextCompat.startForegroundService(
+                this@AudioBookApplication,
+                Intent(this@AudioBookApplication, PlaybackService::class.java),
+            )
+        }
     }
 
     /**

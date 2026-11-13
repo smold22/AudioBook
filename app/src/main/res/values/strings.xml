@@ -1,3 +1,58 @@
-﻿<resources>
+<resources>
     <string name="app_name">Слушать всем</string>
+
+    <!-- Навигация: разделы нижней панели и боковой панели на TV -->
+    <string name="nav_section_home">Главная</string>
+    <string name="nav_section_favorites">Избранное</string>
+    <string name="nav_section_watchlist">Буду слушать</string>
+    <string name="nav_section_genres">Жанры</string>
+    <string name="nav_section_history">История</string>
+    <string name="nav_section_downloads">Загрузки</string>
+    <string name="nav_section_me">Я</string>
+
+    <!-- Кастомизация интерфейса: заголовки и описания -->
+    <string name="ui_customization_title">Вид интерфейса</string>
+
+    <string name="list_density_title">Плотность списков</string>
+    <string name="list_density_description">Размер обложек, строк и отступов в списках книг и глав</string>
+    <string name="list_density_compact">Компактно</string>
+    <string name="list_density_normal">Обычно</string>
+    <string name="list_density_spacious">Просторно</string>
+
+    <string name="player_elements_title">Элементы плеера</string>
+    <string name="player_show_cover">Обложка книги</string>
+    <string name="player_show_cover_description">Показывать обложку на экране плеера</string>
+    <string name="player_show_track_title">Название главы</string>
+    <string name="player_show_track_title_description">Под названием главы будет показано название книги</string>
+    <string name="player_show_remaining">Оставшееся время</string>
+    <string name="player_show_remaining_description">Сколько осталось слушать во всей книге</string>
+
+    <string name="nav_section_start_badge">Открывается при запуске</string>
+    <string name="nav_section_last_visible">Нельзя скрыть последний раздел</string>
+    <string name="nav_drag_handle">Перетащить раздел</string>
+    <string name="nav_move_up">Переместить выше</string>
+    <string name="nav_move_down">Переместить ниже</string>
+
+    <string name="start_section_title">Стартовый экран</string>
+    <string name="start_section_description">Какой раздел открывается при запуске приложения</string>
+    <string name="start_section_applies_on_restart">Применится при следующем запуске</string>
+    <string name="start_section_hidden_fallback">Раздел скрыт, вместо него откроется первый видимый</string>
+
+    <string name="common_done">Готово</string>
+
+    <!-- Таймер сна -->
+    <string name="sleep_title">Таймер сна</string>
+    <string name="sleep_minutes">%1$d минут</string>
+    <string name="sleep_minutes_active">%1$d минут (активен)</string>
+    <string name="sleep_end_of_chapter">Дочитать до конца главы</string>
+    <string name="sleep_end_of_chapter_active">Дочитать до конца главы (активен)</string>
+    <string name="sleep_end_of_book">Дочитать до конца книги</string>
+    <string name="sleep_end_of_book_active">Дочитать до конца книги (активен)</string>
+    <string name="sleep_fade_title">Постепенное затухание</string>
+    <string name="sleep_fade_description">Плавно снизить громкость перед остановкой. Если изменить громкость во время затухания, оно отменится</string>
+    <string name="sleep_fade_off">Выкл.</string>
+    <string name="sleep_fade_seconds">%1$d с</string>
+    <string name="sleep_disable">Выключить таймер</string>
+
+    <!-- Слушать по ссылке -->
 </resources>

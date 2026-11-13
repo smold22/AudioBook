@@ -1,6 +1,6 @@
 package com.yourapp.audiobook.ui
-
 import androidx.activity.compose.BackHandler
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -47,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -62,21 +63,27 @@ import com.yourapp.audiobook.AudioBookApplication
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.ui.components.LocalNavController
 import com.yourapp.audiobook.ui.components.MiniPlayer
+import com.yourapp.audiobook.ui.config.LocalUiConfig
+import com.yourapp.audiobook.ui.config.NavSection
+import com.yourapp.audiobook.ui.config.navSectionIcon
+import com.yourapp.audiobook.ui.config.navSectionLabel
 import dev.chrisbanes.haze.rememberHazeState
 
 private data class TabItem(
-    val route: String,
-    val label: String,
+    val section: NavSection,
     val icon: androidx.compose.ui.graphics.vector.ImageVector,
 )
 
-private val tabs = listOf(
-    TabItem("home", "Главная", Icons.Filled.Home),
-    TabItem("genres", "Жанры", Icons.AutoMirrored.Filled.List),
-    TabItem("history", "История", Icons.Filled.History),
-    TabItem("downloads", "Загрузки", Icons.Filled.Download),
-    TabItem("me", "Я", Icons.Filled.Person),
-)
+/** Разделы навигации: иконка. Порядок, видимость и подписи — из настроек. */
+private val tabs: List<TabItem> = NavSection.entries.map {
+    TabItem(it, navSectionIcon(it))
+}
+
+/** Пересобирает список вкладок по разделам, сохраняя иконки. */
+private fun List<TabItem>.forSections(sections: List<NavSection>): List<TabItem> {
+    val bySection = associate { it.section to it }
+    return sections.mapNotNull { bySection[it] }
+}
 
 @Composable
 fun AppNavHost(onExitApp: () -> Unit) {
@@ -105,7 +112,27 @@ fun AppNavHost(onExitApp: () -> Unit) {
     val navUnselectedColor =
         if (darkTheme) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
     var playerOpenedOnLaunch by remember { mutableStateOf(false) }
-    val tabRoutes = tabs.map { it.route }
+    // Порядок и состав нижней навигации берём из настроек, поэтому вкладки
+    // строятся заново при каждом изменении. Подписи берём из ресурсов, чтобы
+    // язык экрана и язык настроек совпадали.
+    val uiConfig = LocalUiConfig.current
+    // visibleSections уже умеет подставлять HOME, если скрыты все разделы
+    // (например, после восстановления из старой резервной копии), поэтому
+    // нижняя панель не может оказаться пустой. Разделы только для ТВ в неё
+    // не попадают: на смартфоне «Избранное» и «Буду слушать» живут в «Я».
+    val visibleTabs = remember(uiConfig.visibleSections) {
+        tabs.forSections(uiConfig.visibleSections)
+    }
+    // Боковая панель TV: все разделы в порядке объявления, без настроек —
+    // на ТВ их и скрывать нечем.
+    val tvTabs = remember { tabs.forSections(NavSection.TV) }
+    val tabRoutes = remember(visibleTabs) { visibleTabs.map { it.section.route } }
+    val navRoutes = remember(visibleTabs, tvTabs) { (visibleTabs + tvTabs).map { it.section.route } }
+    // Стартовый раздел запоминается один раз: пересоздавать граф навигации во
+    // время работы приложения нельзя, поэтому смена раздела применяется при
+    // следующем запуске. AppRoot дожидается первого значения из DataStore,
+    // так что здесь уже не значение по умолчанию, а сохранённое.
+    val startRoute = remember { uiConfig.effectiveStartSection.route }
     // Нижний системный отступ (жестовая зона/системная панель): добавляется к высоте подложки.
     val navBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val underlayHeight = remember(tabUnderlayHeight) {
@@ -116,8 +143,10 @@ fun AppNavHost(onExitApp: () -> Unit) {
         }
     }
 
-    LaunchedEffect(openPlayerOnLaunch, nowPlaying, playerOpenedOnLaunch) {
-        if (openPlayerOnLaunch && !playerOpenedOnLaunch && nowPlaying != null) {
+    // Плеер открываем независимо от того, успела ли загрузиться последняя
+    // книга: иначе на чистой установке без истории настройка не срабатывала бы.
+    LaunchedEffect(openPlayerOnLaunch, playerOpenedOnLaunch) {
+        if (openPlayerOnLaunch && !playerOpenedOnLaunch) {
             navController.navigate("player") { launchSingleTop = true }
             playerOpenedOnLaunch = true
         }
@@ -131,24 +160,20 @@ fun AppNavHost(onExitApp: () -> Unit) {
         }
     }
 
-    BackHandler(enabled = closeOnBackLongPress && currentRoute in tabRoutes) {
+    BackHandler(enabled = closeOnBackLongPress && currentRoute in navRoutes) {
         onExitApp()
     }
 
     val tvMode = isTvMode
 
-    // На Android TV плеер открывается сразу при начале воспроизведения.
-    var lastAutoOpenedKey by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(tvMode, nowPlaying) {
-        val np = nowPlaying
-        if (np == null) {
-            lastAutoOpenedKey = null
-        } else if (tvMode) {
-            val key = app.bookCache.keyOf(np.book)
-            if (key != lastAutoOpenedKey) {
-                lastAutoOpenedKey = key
-                navController.navigate("player") { launchSingleTop = true }
-            }
+    // На Android TV после «Слушать» сразу открывается плеер: оставаться на
+    // странице книги незачем, а вернуться с неё с пульта неудобно.
+    // Реагируем именно на запуск воспроизведения, а не на смену книги —
+    // иначе повторное «Слушать» для уже загруженной книги ничего бы не делало.
+    val playStarts by app.playerController.playStarts.collectAsStateWithLifecycle()
+    LaunchedEffect(tvMode, playStarts) {
+        if (tvMode && playStarts > 0 && currentRoute != "player") {
+            navController.navigate("player") { launchSingleTop = true }
         }
     }
 
@@ -168,7 +193,7 @@ fun AppNavHost(onExitApp: () -> Unit) {
             Row(Modifier.weight(1f).fillMaxWidth()) {
                 if (currentRoute != "player") {
                     TvSideNav(
-                        tabs = tabs,
+                        tabs = tvTabs,
                         currentRoute = currentRoute,
                         hideLabels = hideTabLabels,
                         iconColor = navIconColor,
@@ -185,7 +210,7 @@ fun AppNavHost(onExitApp: () -> Unit) {
                 }
                 NavHost(
                     navController = navController,
-                    startDestination = "home",
+                    startDestination = startRoute,
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                 ) {
                     appRoutes(navController)
@@ -213,7 +238,7 @@ fun AppNavHost(onExitApp: () -> Unit) {
         ) {
             NavHost(
                 navController = navController,
-                startDestination = "home",
+                startDestination = startRoute,
                 modifier = Modifier.fillMaxSize().statusBarsPadding(),
             ) {
                 appRoutes(navController)
@@ -252,12 +277,13 @@ fun AppNavHost(onExitApp: () -> Unit) {
                             modifier = Modifier.height(underlayHeight + navBarInset),
                             containerColor = Color.Transparent,
                         ) {
-                            tabs.forEach { tab ->
-                                val selected = currentRoute == tab.route
+                            visibleTabs.forEach { tab ->
+                                val selected = currentRoute == tab.section.route
+                                val label = navSectionLabel(tab.section)
                                 NavigationBarItem(
                                     selected = selected,
                                     onClick = {
-                                        navController.navigate(tab.route) {
+                                        navController.navigate(tab.section.route) {
                                             popUpTo(navController.graph.findStartDestination().id) {
                                                 saveState = true
                                             }
@@ -266,7 +292,7 @@ fun AppNavHost(onExitApp: () -> Unit) {
                                         }
                                     },
                                     icon = { Icon(tab.icon, contentDescription = null) },
-                                    label = if (hideTabLabels) null else { { Text(tab.label) } },
+                                    label = if (hideTabLabels) null else { { Text(label) } },
                                     colors = NavigationBarItemDefaults.colors(
                                         selectedIconColor = navIconColor,
                                         selectedTextColor = navTextColor,
@@ -311,12 +337,14 @@ private fun TvSideNav(
         Spacer(Modifier.weight(1f))
         tabs.forEachIndexed { index, tab ->
             if (index > 0) Spacer(Modifier.height(4.dp))
+            val route = tab.section.route
+            val label = navSectionLabel(tab.section)
             NavigationRailItem(
-                selected = currentRoute == tab.route,
-                onClick = { onTabSelected(tab.route) },
-                icon = { Icon(tab.icon, contentDescription = tab.label) },
+                selected = currentRoute == route,
+                onClick = { onTabSelected(route) },
+                icon = { Icon(tab.icon, contentDescription = label) },
                 label = if (hideLabels) null else {
-                    { Text(tab.label, style = MaterialTheme.typography.labelSmall) }
+                    { Text(label, style = MaterialTheme.typography.labelSmall) }
                 },
                 colors = NavigationRailItemDefaults.colors(
                     selectedIconColor = iconColor,

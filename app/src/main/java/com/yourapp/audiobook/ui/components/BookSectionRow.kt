@@ -37,6 +37,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.yourapp.audiobook.AudioBookApplication
 import com.yourapp.audiobook.source.api.Book
+import com.yourapp.audiobook.ui.config.uiMetrics
 import com.yourapp.audiobook.ui.isTvMode
 import com.yourapp.audiobook.ui.rememberAppImageLoader
 import com.yourapp.audiobook.ui.tvFocus
@@ -66,11 +67,15 @@ fun BookSectionRow(
     }
     val visibleBooks = books.filterNot { "${it.sourceId}:${it.id}" in deadKeys }
     if (visibleBooks.isEmpty() && emptyHint == null) return
+    val metrics = uiMetrics()
     Column {
         Text(
             text = title,
             style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier.padding(
+                horizontal = metrics.sectionHorizontalPadding,
+                vertical = metrics.sectionTitleVerticalPadding,
+            ),
         )
         if (visibleBooks.isEmpty()) {
             if (loading) {
@@ -94,8 +99,8 @@ fun BookSectionRow(
             }
         } else {
             LazyRow(
-                contentPadding = PaddingValues(horizontal = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(horizontal = metrics.sectionRowHorizontalPadding),
+                horizontalArrangement = Arrangement.spacedBy(metrics.sectionSpacing),
             ) {
                 items(
                     visibleBooks.distinctBy { "${it.sourceId}:${it.id}" },
@@ -115,10 +120,11 @@ fun BookSectionRow(
 
 @Composable
 private fun ShowAllCard(onShowAll: () -> Unit, label: String) {
+    val metrics = uiMetrics()
     Box(
         modifier = Modifier
-            .width(110.dp)
-            .height(150.dp)
+            .width(metrics.miniCoverWidth)
+            .height(metrics.miniCoverHeight)
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .clickable(onClick = onShowAll)
@@ -145,10 +151,11 @@ private fun ShowAllCard(onShowAll: () -> Unit, label: String) {
 private fun MiniBookCard(book: Book, onClick: () -> Unit) {
     val imageLoader = rememberAppImageLoader()
     val tvMode = isTvMode
+    val metrics = uiMetrics()
     var contextBook by remember { mutableStateOf<Book?>(null) }
     Column(
         modifier = Modifier
-            .width(110.dp)
+            .width(metrics.miniCoverWidth)
             .then(
                 if (tvMode) {
                     Modifier.clickable(onClick = onClick)
@@ -161,7 +168,7 @@ private fun MiniBookCard(book: Book, onClick: () -> Unit) {
                 },
             )
             .tvFocus()
-            .padding(bottom = 8.dp),
+            .padding(bottom = metrics.gridItemBottomPadding),
     ) {
         AsyncImage(
             model = book.coverUrl,
@@ -170,7 +177,7 @@ private fun MiniBookCard(book: Book, onClick: () -> Unit) {
             error = CoverError,
             imageLoader = imageLoader,
             modifier = Modifier
-                .size(width = 110.dp, height = 150.dp)
+                .size(width = metrics.miniCoverWidth, height = metrics.miniCoverHeight)
                 .clip(RoundedCornerShape(8.dp)),
             contentScale = ContentScale.Crop,
         )

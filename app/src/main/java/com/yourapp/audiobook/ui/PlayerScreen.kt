@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -89,6 +90,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -99,13 +101,17 @@ import android.net.Uri
 import android.widget.Toast
 import coil3.compose.AsyncImage
 import com.yourapp.audiobook.AudioBookApplication
+import com.yourapp.audiobook.R
 import com.yourapp.audiobook.data.Bookmark
 import com.yourapp.audiobook.player.EqualizerState
 import com.yourapp.audiobook.player.NowPlaying
 import com.yourapp.audiobook.player.SleepTimer
 import com.yourapp.audiobook.player.SleepTimerMode
+import com.yourapp.audiobook.player.SleepTimerPolicy
 import com.yourapp.audiobook.source.api.AudioTrack
 import com.yourapp.audiobook.ui.components.DownloadButton
+import com.yourapp.audiobook.ui.config.LocalUiConfig
+import com.yourapp.audiobook.ui.config.uiMetrics
 import com.yourapp.audiobook.ui.theme.nowPlayingColor
 import kotlinx.coroutines.launch
 
@@ -118,6 +124,7 @@ fun PlayerScreen(navController: NavHostController) {
     val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
     val nowPlaying by controller.nowPlaying.collectAsStateWithLifecycle()
     val sleepTimer by viewModel.sleepTimer.collectAsStateWithLifecycle()
+    val sleepFadeSeconds by viewModel.sleepTimerFadeSeconds.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val favoriteKeys by app.favoritesStore.favoriteKeys.collectAsStateWithLifecycle(initialValue = emptySet())
     val watchlistKeys by app.watchlistStore.watchlistKeys.collectAsStateWithLifecycle(initialValue = emptySet())
@@ -135,6 +142,9 @@ fun PlayerScreen(navController: NavHostController) {
     val readerOptions by viewModel.readerOptions.collectAsStateWithLifecycle()
     val readerSearching by viewModel.readerSearching.collectAsStateWithLifecycle()
     val readerError by viewModel.readerError.collectAsStateWithLifecycle()
+    // Настройки внешнего вида: скрытие обложки/названия главы/«Осталось» и плотность.
+    val uiConfig = LocalUiConfig.current
+    val metrics = uiMetrics()
 
     LaunchedEffect(readerError) {
         readerError?.let {
@@ -186,14 +196,15 @@ fun PlayerScreen(navController: NavHostController) {
                             text = when (timer.mode) {
                                 SleepTimerMode.TIME ->
                                     formatSleepRemaining((timer.endAtMs ?: 0L) - System.currentTimeMillis())
-                                SleepTimerMode.END_OF_CHAPTER -> "До конца главы"
+                                SleepTimerMode.END_OF_CHAPTER -> stringResource(R.string.sleep_end_of_chapter)
+                                SleepTimerMode.END_OF_BOOK -> stringResource(R.string.sleep_end_of_book)
                             },
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
                         )
                     }
                     IconButton(onClick = { showSleepDialog = true }) {
-                        Icon(Icons.Filled.Bedtime, contentDescription = "Таймер сна")
+                        Icon(Icons.Filled.Bedtime, contentDescription = stringResource(R.string.sleep_title))
                     }
                     IconButton(
                         onClick = {
@@ -273,14 +284,16 @@ fun PlayerScreen(navController: NavHostController) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.weight(1f))
-                    if (totalBookRemainingMs != null && totalBookRemainingMs > 0) {
+                    // «Осталось» скрывается настройкой; без него время просто
+                    // расходится по краям строки.
+                    if (uiConfig.playerShowRemaining && totalBookRemainingMs != null && totalBookRemainingMs > 0) {
                         Text(
                             text = "Осталось: ${formatMs(totalBookRemainingMs)}",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
                         )
+                        Spacer(Modifier.weight(1f))
                     }
-                    Spacer(Modifier.weight(1f))
                     Text(
                         "-${formatMs(currentTrackRemainingMs)}",
                         style = MaterialTheme.typography.labelMedium,
@@ -359,25 +372,32 @@ fun PlayerScreen(navController: NavHostController) {
                         },
                     )
                     Spacer(Modifier.height(4.dp))
-                    AsyncImage(
-                        model = playing.book.coverUrl,
-                        contentDescription = playing.book.title,
-                        imageLoader = app.imageLoader,
-                        modifier = Modifier
-                            .size(width = 220.dp, height = 330.dp)
-                            .clip(RoundedCornerShape(12.dp)),
-                        contentScale = ContentScale.Crop,
-                    )
-                    Spacer(Modifier.height(12.dp))
+                    if (uiConfig.playerShowCover) {
+                        AsyncImage(
+                            model = playing.book.coverUrl,
+                            contentDescription = playing.book.title,
+                            imageLoader = app.imageLoader,
+                            modifier = Modifier
+                                .size(
+                                    width = metrics.tvPlayerCoverWidth,
+                                    height = metrics.tvPlayerCoverHeight,
+                                )
+                                .clip(RoundedCornerShape(12.dp)),
+                            contentScale = ContentScale.Crop,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                    }
                     val currentTrack = playing.tracks.getOrNull(snapshot.trackIndex)
-                    Text(
-                        text = currentTrack?.title ?: playing.book.title,
-                        style = MaterialTheme.typography.headlineSmall,
-                        textAlign = TextAlign.Center,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    if (uiConfig.playerShowTrackTitle) {
+                        Text(
+                            text = currentTrack?.title ?: playing.book.title,
+                            style = MaterialTheme.typography.headlineSmall,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                     Text(
                         text = playing.book.title,
                         style = MaterialTheme.typography.bodyMedium,
@@ -436,34 +456,38 @@ fun PlayerScreen(navController: NavHostController) {
                     },
                 )
                 Spacer(Modifier.height(8.dp))
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    AsyncImage(
-                        model = playing.book.coverUrl,
-                        contentDescription = playing.book.title,
-                        imageLoader = app.imageLoader,
+                if (uiConfig.playerShowCover) {
+                    Box(
                         modifier = Modifier
-                            .fillMaxHeight(0.88f)
-                            .aspectRatio(2f / 3f)
-                            .clip(RoundedCornerShape(16.dp)),
-                        contentScale = ContentScale.Crop,
-                    )
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        AsyncImage(
+                            model = playing.book.coverUrl,
+                            contentDescription = playing.book.title,
+                            imageLoader = app.imageLoader,
+                            modifier = Modifier
+                                .fillMaxHeight(0.88f)
+                                .aspectRatio(2f / 3f)
+                                .clip(RoundedCornerShape(16.dp)),
+                            contentScale = ContentScale.Crop,
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
                 }
-                Spacer(Modifier.height(8.dp))
                 val currentTrack = playing.tracks.getOrNull(snapshot.trackIndex)
-                Text(
-                    text = currentTrack?.title ?: playing.book.title,
-                    style = MaterialTheme.typography.titleLarge,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(2.dp))
+                if (uiConfig.playerShowTrackTitle) {
+                    Text(
+                        text = currentTrack?.title ?: playing.book.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(2.dp))
+                }
                 Text(
                     text = playing.book.title,
                     style = MaterialTheme.typography.bodyMedium,
@@ -485,17 +509,21 @@ fun PlayerScreen(navController: NavHostController) {
     if (showSleepDialog) {
         SleepTimerDialog(
             activeTimer = sleepTimer,
+            fadeSeconds = sleepFadeSeconds,
             onSelectMinutes = { minutes ->
                 viewModel.setSleepTimer(minutes)
-                showSleepDialog = false
             },
             onSelectChapterEnd = {
                 viewModel.setSleepTimerToEndOfChapter()
-                showSleepDialog = false
+            },
+            onSelectBookEnd = {
+                viewModel.setSleepTimerToEndOfBook()
+            },
+            onSelectFade = { seconds ->
+                viewModel.setSleepTimerFadeSeconds(seconds)
             },
             onDisable = {
                 viewModel.setSleepTimer(null)
-                showSleepDialog = false
             },
             onDismiss = { showSleepDialog = false },
         )
@@ -608,6 +636,7 @@ private fun TrackList(
     modifier: Modifier = Modifier,
 ) {
     val currentColor = nowPlayingColor()
+    val metrics = uiMetrics()
     LazyColumn(
         modifier = modifier,
         state = listState,
@@ -619,7 +648,10 @@ private fun TrackList(
                     .fillMaxWidth()
                     .clickable { onSelect(index) }
                     .tvFocus()
-                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                    .padding(
+                        horizontal = metrics.trackHorizontalPadding / 2,
+                        vertical = metrics.trackVerticalPadding,
+                    ),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -830,27 +862,42 @@ private fun ReaderPickerDialog(
     )
 }
 
+/**
+ * Диалог таймера сна: режим остановки и постепенное затухание.
+ *
+ * Диалог не закрывается после выбора — затухание настраивается отдельно
+ * и часто меняется вместе с режимом, поэтому лишний тап по «Закрыть» не нужен.
+ */
 @Composable
 private fun SleepTimerDialog(
     activeTimer: SleepTimer?,
+    fadeSeconds: Int,
     onSelectMinutes: (Int) -> Unit,
     onSelectChapterEnd: () -> Unit,
+    onSelectBookEnd: () -> Unit,
+    onSelectFade: (Int) -> Unit,
     onDisable: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val options = listOf(15, 30, 45, 60)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Таймер сна") },
+        title = { Text(stringResource(R.string.sleep_title)) },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 options.forEach { minutes ->
                     val active = activeTimer?.mode == SleepTimerMode.TIME && activeTimer.minutes == minutes
                     TextButton(
                         onClick = { onSelectMinutes(minutes) },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text(if (active) "$minutes минут (активен)" else "$minutes минут")
+                        Text(
+                            if (active) {
+                                stringResource(R.string.sleep_minutes_active, minutes)
+                            } else {
+                                stringResource(R.string.sleep_minutes, minutes)
+                            },
+                        )
                     }
                 }
                 val chapterActive = activeTimer?.mode == SleepTimerMode.END_OF_CHAPTER
@@ -858,14 +905,70 @@ private fun SleepTimerDialog(
                     onClick = onSelectChapterEnd,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(if (chapterActive) "Дочитать до конца главы (активен)" else "Дочитать до конца главы")
+                    Text(
+                        if (chapterActive) {
+                            stringResource(R.string.sleep_end_of_chapter_active)
+                        } else {
+                            stringResource(R.string.sleep_end_of_chapter)
+                        },
+                    )
                 }
+                val bookActive = activeTimer?.mode == SleepTimerMode.END_OF_BOOK
+                TextButton(
+                    onClick = onSelectBookEnd,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        if (bookActive) {
+                            stringResource(R.string.sleep_end_of_book_active)
+                        } else {
+                            stringResource(R.string.sleep_end_of_book)
+                        },
+                    )
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                Text(
+                    text = stringResource(R.string.sleep_fade_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = stringResource(R.string.sleep_fade_description),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                // 0 — без затухания, дальше варианты из настроек.
+                // Ряд прокручивается: пять чипов не влезают в узкий экран.
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    (listOf(SleepTimerPolicy.FADE_DEFAULT_SECONDS) + SleepTimerPolicy.FADE_OPTIONS_SECONDS)
+                        .forEach { seconds ->
+                            FilterChip(
+                                selected = fadeSeconds == seconds,
+                                onClick = { onSelectFade(seconds) },
+                                label = {
+                                    Text(
+                                        if (seconds == 0) {
+                                            stringResource(R.string.sleep_fade_off)
+                                        } else {
+                                            stringResource(R.string.sleep_fade_seconds, seconds)
+                                        },
+                                    )
+                                },
+                            )
+                        }
+                }
+
                 if (activeTimer != null) {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                     TextButton(
                         onClick = onDisable,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("Выключить таймер")
+                        Text(stringResource(R.string.sleep_disable))
                     }
                 }
             }
@@ -873,7 +976,7 @@ private fun SleepTimerDialog(
         confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Закрыть")
+                Text(stringResource(R.string.common_done))
             }
         },
     )

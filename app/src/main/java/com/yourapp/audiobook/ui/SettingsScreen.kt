@@ -102,6 +102,7 @@ import com.yourapp.audiobook.data.IgnoreSection
 
 import com.yourapp.audiobook.data.SettingsStore
 import com.yourapp.audiobook.source.api.Genre
+import com.yourapp.audiobook.ui.config.UiConfigSettingsSection
 import com.yourapp.audiobook.ui.theme.AccentPalettes
 import com.yourapp.audiobook.update.UpdateStatus
 import dev.chrisbanes.haze.hazeSource
@@ -517,31 +518,35 @@ fun SettingsScreen(navController: NavHostController) {
             }
             
         }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { showIconDialog = true }
-                .tvFocus()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Иконка приложения", style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    AppIconSwitcher.options.firstOrNull { it.key == appIcon }?.label ?: "Стандартная",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+        // Иконка лаунчера на ТВ не нужна: иконки нет на главном экране,
+        // а смена занимает место в списке настроек.
+        if (!tvDevice) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showIconDialog = true }
+                    .tvFocus()
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Иконка приложения", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        AppIconSwitcher.options.firstOrNull { it.key == appIcon }?.label ?: "Стандартная",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Image(
+                    painter = painterResource(
+                        AppIconSwitcher.options.firstOrNull { it.key == appIcon }?.res ?: R.mipmap.ic_launcher,
+                    ),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clip(RoundedCornerShape(6.dp)),
                 )
             }
-            Image(
-                painter = painterResource(
-                    AppIconSwitcher.options.firstOrNull { it.key == appIcon }?.res ?: R.mipmap.ic_launcher,
-                ),
-                contentDescription = null,
-                modifier = Modifier
-                    .size(24.dp)
-                    .clip(RoundedCornerShape(6.dp)),
-            )
         }
         
         Row(
@@ -601,21 +606,12 @@ fun SettingsScreen(navController: NavHostController) {
             }
         }
         
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Скрыть подписи вкладок", style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    "На нижней панели останутся только значки",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(
+        // На ТВ нижней панели нет: разделы живут в боковой панели, и подписи
+        // там не отключаются.
+        if (!tvDevice) {
+            SettingsToggleRow(
+                title = "Скрыть подписи вкладок",
+                subtitle = "На нижней панели останутся только значки",
                 checked = hideTabLabels,
                 onCheckedChange = { scope.launch { app.settingsStore.setHideTabLabels(it) } },
             )
@@ -661,61 +657,34 @@ fun SettingsScreen(navController: NavHostController) {
             }
             
         }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Воспроизводить последнюю книгу при запуске", style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    "При открытии приложения автоматически продолжится прослушивание последней книги",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(
-                checked = resumeOnLaunch,
-                onCheckedChange = { scope.launch { app.settingsStore.setResumeOnLaunch(it) } },
-            )
+        // Форма обложек, плотность списков, элементы плеера, порядок и
+        // состав разделов навигации, стартовый экран. Состояние приходит из
+        // LocalUiConfig, поэтому предпросмотр и обычные экраны согласованы.
+        // На ТВ всё это лишнее: нижней панели нет, а порядок разделов виден
+        // в боковой навигации.
+        if (!tvDevice) {
+            UiConfigSettingsSection()
         }
+        SettingsToggleRow(
+            title = "Воспроизводить последнюю книгу при запуске",
+            subtitle = "При открытии приложения автоматически продолжится прослушивание последней книги",
+            checked = resumeOnLaunch,
+            onCheckedChange = { scope.launch { app.settingsStore.setResumeOnLaunch(it) } },
+        )
         
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Открывать окно плеера при запуске", style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    "При открытии приложения сразу откроется экран плеера, если что-то играет",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(
-                checked = openPlayerOnLaunch,
-                onCheckedChange = { scope.launch { app.settingsStore.setOpenPlayerOnLaunch(it) } },
-            )
-        }
+        SettingsToggleRow(
+            title = "Открывать окно плеера при запуске",
+            subtitle = "При открытии приложения сразу откроется экран плеера с последней книгой",
+            checked = openPlayerOnLaunch,
+            onCheckedChange = { scope.launch { app.settingsStore.setOpenPlayerOnLaunch(it) } },
+        )
         
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Закрывать приложение нажатием «Назад»", style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    "Нажатие «Назад» на главных экранах полностью закроет приложение",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(
+        // На ТВ «Назад» закрывает приложение и без этой настройки, а длинное
+        // нажатие на пульте до раздела не доходит.
+        if (!tvDevice) {
+            SettingsToggleRow(
+                title = "Закрывать приложение нажатием «Назад»",
+                subtitle = "Нажатие «Назад» на главных экранах полностью закроет приложение",
                 checked = closeOnBackLongPress,
                 onCheckedChange = { scope.launch { app.settingsStore.setCloseOnBackLongPress(it) } },
             )
@@ -740,25 +709,12 @@ fun SettingsScreen(navController: NavHostController) {
             }
         }
         
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Скрывать авторов-женщин", style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    "Определяется по имени и фамилии (например, Анна Иванова). Возможны ошибки на редких именах",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(
-                checked = hideFemaleAuthors,
-                onCheckedChange = { scope.launch { app.settingsStore.setHideFemaleAuthors(it) } },
-            )
-        }
+        SettingsToggleRow(
+            title = "Скрывать авторов-женщин",
+            subtitle = "Определяется по имени и фамилии (например, Анна Иванова). Возможны ошибки на редких именах",
+            checked = hideFemaleAuthors,
+            onCheckedChange = { scope.launch { app.settingsStore.setHideFemaleAuthors(it) } },
+        )
         
         Row(
             modifier = Modifier
@@ -1338,6 +1294,44 @@ fun SettingsScreen(navController: NavHostController) {
         }
         Text("Настройки", style = MaterialTheme.typography.titleLarge)
     }
+    }
+}
+
+/**
+ * Строка настройки-переключателя. На ТВ фокусируется вся строка, а чекбокс
+ * остаётся индикатором: отдельно он не ловит фокус, и стрелка вниз проскакивала
+ * сразу на следующую строку. На телефоне переключатель нажимается сам.
+ */
+@Composable
+private fun SettingsToggleRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val context = LocalContext.current
+    val tvDevice = remember(context) { UiModeRouter.isTvDevice(context) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (tvDevice) Modifier.clickable { onCheckedChange(!checked) } else Modifier)
+            .tvFocus()
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (tvDevice) {
+            Checkbox(checked = checked, onCheckedChange = null)
+        } else {
+            Switch(checked = checked, onCheckedChange = onCheckedChange)
+        }
     }
 }
 
